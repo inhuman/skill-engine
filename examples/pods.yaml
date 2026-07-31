@@ -1,0 +1,56 @@
+# Маленький скилл целиком: разбор запроса → вызов → ответ.
+#
+# Показывает главное свойство формата: набор инструментов задаётся ШАГОМ.
+# У шагов разбора и ответа `tools: []` — они физически не могут никуда сходить.
+
+skill_engine_version: "1.0.0"
+skill_version: "1.0.0"
+name: pods
+description: Показать поды кластера в заданном пространстве имён.
+role: reader
+kind: leaf
+
+# Кластеры, до которых скиллу вообще разрешено дотянуться.
+servers: [staging, prod]
+
+workflow:
+  tools: [staging, prod]
+  steps:
+    # Разбор запроса в поля. Инструментов нет — шагу нечего вызывать.
+    - name: understand
+      instruction: |
+        Запрос: {{input}}
+
+        cluster — какой кластер назван: staging или prod; не назван — staging.
+        namespace — пространство имён; не названо — пустая строка.
+      tools: []
+      sampling:
+        temperature: 0
+      response_schema:
+        type: object
+        properties:
+          cluster: {type: string}
+          namespace: {type: string}
+        # Всё, чего нет в required, модель вправе не прислать — и не присылает.
+        required: [cluster, namespace]
+      save_as: req
+
+    # Вызов без генерации: аргументы известны, модели тут делать нечего.
+    - name: fetch
+      call:
+        tool: list_pods
+        args:
+          namespace: "{{req.namespace}}"
+      # Сервер вычисляется из разбора — но только В ПРЕДЕЛАХ набора выше:
+      # шаг может сузить радиус, расширить не может.
+      on_server: "{{req.cluster}}"
+      save_as: pods
+
+    # Шаг без save_as пишет в ответ хода.
+    - name: report
+      instruction: |
+        Поды пространства {{req.namespace}} (кластер {{req.cluster}}):
+        {{pods}}
+
+        Ответь: имя пода → статус.
+      tools: []

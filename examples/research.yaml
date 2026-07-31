@@ -1,0 +1,66 @@
+# Ответ на вопрос по нескольким источникам сразу.
+#
+# Показывает `parallel` и то, ради чего он в формате: ветки, не пошедшие по
+# `when`, попадают в `<collect>.skipped`. Без этого шаг ответа не отличит
+# «в источнике пусто» от «в источник не ходили» — и честно соврёт.
+
+skill_engine_version: "1.0.0"
+skill_version: "1.0.0"
+name: research
+description: Ответить на вопрос, собрав факты из нескольких источников.
+role: investigator
+kind: leaf
+
+servers: [docs, forum, web]
+
+workflow:
+  tools: [docs, forum, web]
+
+  steps:
+    - name: understand
+      instruction: |
+        Вопрос: {{input}}
+
+        topic — о чём спрашивают, двумя-тремя словами;
+        need_web — true, если ответ зависит от свежих событий.
+      tools: []
+      response_schema:
+        type: object
+        properties:
+          topic: {type: string}
+          need_web: {type: boolean}
+        required: [topic, need_web]
+      save_as: req
+
+    - parallel:
+        collect: sources
+        on_error: continue
+        branches:
+          - - name: in_docs
+              instruction: "Найди в документации: {{req.topic}}. Верни цитаты."
+              tools: [docs]
+              max_calls: 3
+              save_as: sources
+
+          - - name: in_forum
+              instruction: "Найди обсуждения по теме: {{req.topic}}. Верни выводы."
+              tools: [forum]
+              max_calls: 3
+              save_as: sources
+
+          - - name: in_web
+              when: "req.need_web == true"
+              instruction: "Поищи свежее по теме: {{req.topic}}."
+              tools: [web]
+              max_calls: 3
+              save_as: sources
+
+    - name: answer
+      instruction: |
+        Вопрос: {{input}}
+        Собрано: {{sources}}
+        В эти источники не ходили: {{sources.skipped}}
+
+        Ответь по собранному. Про источник из списка «не ходили» НЕ говори,
+        что там пусто — там не смотрели.
+      tools: []

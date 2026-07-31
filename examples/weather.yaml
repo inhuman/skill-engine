@@ -1,0 +1,49 @@
+# Погода через браузер: сходить на страницу, снять число, ответить.
+#
+# Показывает: шаг `call` без генерации (адрес известен, модели там делать
+# нечего) и разделение «решить» / «выполнить» — разбор запроса идёт БЕЗ
+# инструментов, браузер достаётся только шагу, которому он нужен.
+
+skill_engine_version: "1.0.0"
+skill_version: "1.0.0"
+name: weather
+description: Сказать погоду в названном городе.
+role: reader
+kind: leaf
+
+servers: [browser]
+
+workflow:
+  tools: [browser]
+  steps:
+    - name: understand
+      instruction: |
+        Запрос: {{input}}
+
+        city — город на латинице, как он пишется в адресе сайта погоды
+        (Москва → moscow, Санкт-Петербург → saint-petersburg).
+      tools: []
+      sampling:
+        temperature: 0
+      response_schema:
+        type: object
+        properties:
+          city: {type: string}
+        required: [city]
+      save_as: req
+
+    - name: open_page
+      call:
+        tool: browser:navigate
+        args:
+          url: "https://example-weather.test/{{req.city}}"
+      save_as: page
+
+    - name: answer
+      instruction: |
+        Страница погоды для {{req.city}}:
+        {{page}}
+
+        Ответь одной фразой: температура сейчас и что на небе. Числа бери
+        только со страницы; не нашёл — так и скажи.
+      tools: []

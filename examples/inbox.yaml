@@ -1,0 +1,70 @@
+# Разбор письма в поддержку: классифицировать и поступить по-разному.
+#
+# Показывает главное свойство формата: ГВАРД СТАНОВИТСЯ ВЕТКОЙ. В ветке
+# «спам» шага, который пишет ответ клиенту, физически НЕТ — не потому, что
+# об этом попросили в тексте, а потому, что его там не существует.
+
+skill_engine_version: "1.0.0"
+skill_version: "1.0.0"
+name: inbox
+description: Разобрать входящее письмо и ответить или завести задачу.
+role: executor
+kind: composite
+
+servers: [mail, tracker]
+
+meta:
+  owner: support-team
+  tags: [inbox, triage]
+
+workflow:
+  tools: [mail, tracker]
+
+  steps:
+    - name: classify
+      instruction: |
+        Письмо: {{input}}
+
+        question — спрашивают, как пользоваться;
+        bug — сообщают о поломке;
+        spam — рассылка или бессмыслица.
+      tools: []
+      one_of: [question, bug, spam]
+      save_as: kind
+
+    - switch:
+        var: kind
+        cases:
+          question:
+            - name: reply
+              instruction: |
+                Вопрос клиента: {{input}}
+                Ответь коротко и по делу, без «спасибо за обращение».
+              tools: [mail]
+              max_calls: 1
+
+          bug:
+            # Поломку разбирает отдельный скилл — здесь только заведение задачи.
+            - name: investigate
+              delegate:
+                skill: diagnose
+                task: "разобраться в симптоме: {{input}}"
+              save_as: findings
+
+            - name: file_task
+              instruction: |
+                Симптом: {{input}}
+                Разбор: {{findings}}
+
+                Заведи задачу: заголовок и описание с фактами из разбора.
+                Ничего не добавляй от себя.
+              tools: [tracker]
+              max_calls: 1
+
+        # spam и всё, что не разобралось: тихо закрыть, никому не писать.
+        default:
+          - name: drop
+            instruction: |
+              Письмо не требует ответа. Скажи одной строкой, что оно закрыто
+              без реакции, и почему.
+            tools: []

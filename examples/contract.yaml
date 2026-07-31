@@ -1,0 +1,75 @@
+# Проверка договора: вытащить условия и сверить их с правилами компании.
+#
+# Показывает `if` и `exit`: скилл, которому подсунули не тот документ, ВЫХОДИТ
+# из хода вместо того, чтобы уверенно разобрать что попало. Ещё показывает
+# внешний ассет — правила лежат не в скилле, а в хранилище, и тянутся с
+# политикой (`fetch`), потому что меняются без правки скилла.
+
+skill_engine_version: "1.0.0"
+skill_version: "1.0.0"
+name: contract
+description: Проверить договор на соответствие внутренним правилам.
+role: analyzer
+kind: leaf
+
+servers: [storage]
+
+workflow:
+  tools: [storage]
+
+  assets:
+    policy:
+      kind: text
+      source: storage
+      ref: "legal/contract-rules.md"
+      description: правила согласования договоров
+      fetch:
+        ttl: 1h
+        timeout: 10s
+        retries: 2
+        on_unavailable: fail
+
+  steps:
+    - name: identify
+      instruction: |
+        Документ: {{input}}
+
+        kind — contract, если это договор; other — если что-то другое.
+      tools: []
+      one_of: [contract, other]
+      save_as: doc_kind
+
+    - if:
+        cond: "doc_kind == other"
+        then:
+          # Не наш случай — честный выход вместо уверенного разбора чего попало.
+          - exit:
+              reason: "документ не похож на договор"
+
+    - name: extract
+      instruction: |
+        Договор: {{input}}
+
+        Вытащи: срок, сумму, порядок оплаты, ответственность сторон.
+        Чего в тексте нет — так и помечай, не додумывай.
+      tools: []
+      response_schema:
+        type: object
+        properties:
+          term: {type: string}
+          amount: {type: string}
+          payment: {type: string}
+          liability: {type: string}
+        required: [term, amount, payment, liability]
+      save_as: terms
+
+    - name: compare
+      instruction: |
+        Правила компании:
+        {{asset:policy}}
+
+        Условия договора: {{terms}}
+
+        Назови расхождения: условие → какое правило нарушено → чем грозит.
+        Расхождений нет — так и скажи.
+      tools: []

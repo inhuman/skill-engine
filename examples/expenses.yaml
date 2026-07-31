@@ -1,0 +1,82 @@
+# Отчёт по тратам: выгрузить, посчитать КОДОМ, нарисовать график, отдать файлом.
+#
+# Показывает три вещи разом:
+#   1. ассет-КОД уходит по ссылке ({from: asset:...}) — через контекст модели он
+#      не проходит, и она его не переписывает;
+#   2. данные тоже передаются по ссылке — `{{rows.mem}}` это хендл рабочей
+#      памяти, а не сам текст: выгрузка на тысячу строк не попадает в промпт;
+#   3. `deliver` объявлен в ассете — маршрут не забудется на последнем шаге.
+
+skill_engine_version: "1.0.0"
+skill_version: "1.0.0"
+name: expenses
+description: Показать траты за период графиком по категориям.
+role: executor
+kind: leaf
+
+servers: [ledger, sandbox]
+
+workflow:
+  tools: [ledger, sandbox]
+
+  assets:
+    chart:
+      kind: code
+      lang: python
+      description: столбчатая диаграмма трат по категориям
+      deliver: file
+      content: |
+        import json, sys, collections
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        rows = json.load(sys.stdin)
+        totals = collections.Counter()
+        for r in rows:
+            totals[r["category"]] += r["amount"]
+
+        names = [n for n, _ in totals.most_common()]
+        values = [totals[n] for n in names]
+        plt.figure(figsize=(8, 4))
+        plt.bar(names, values)
+        plt.ylabel("сумма")
+        plt.tight_layout()
+        plt.savefig("/tmp/expenses.png")
+        print("/tmp/expenses.png")
+
+  steps:
+    - name: understand
+      instruction: |
+        Запрос: {{input}}
+
+        period — период выгрузки словами: «месяц», «квартал», «год».
+      tools: []
+      one_of: [месяц, квартал, год]
+      save_as: period
+
+    - name: fetch
+      call:
+        tool: list_transactions
+        args:
+          period: "{{period}}"
+      on_server: ledger
+      save_as: rows
+
+    # Данные едут в скрипт ПО ССЫЛКЕ: модель их не видит и не пересказывает.
+    - name: draw
+      call:
+        tool: run
+        args:
+          code:
+            from: "asset:chart"
+          stdin:
+            from: "{{rows.mem}}"
+      on_server: sandbox
+      save_as: picture
+
+    - name: summary
+      instruction: |
+        Траты за {{period}} собраны, график построен и отправлен.
+        Скажи одной фразой, что готово.
+      tools: []

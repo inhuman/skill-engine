@@ -325,7 +325,7 @@ steps:
 func TestOnServerPicksServerAtRuntime(t *testing.T) {
 	c := &recordingCaller{out: "логи"}
 	f := parseFlow(t, `
-tools: ["devops-k8s", "ift4-k8s"]
+tools: ["staging", "prod"]
 steps:
   - name: logs
     on_server: "{{cluster}}"
@@ -334,9 +334,9 @@ steps:
       args: {name: "pod-1"}
       save_as: out
 `)
-	_, _, err := ExecuteWith(context.Background(), f, Deps{Caller: c}, map[string]string{"cluster": "ift4-k8s"})
+	_, _, err := ExecuteWith(context.Background(), f, Deps{Caller: c}, map[string]string{"cluster": "prod"})
 	require.NoError(t, err)
-	assert.Equal(t, "ift4-k8s", c.server, "вызов ушёл на вычисленный сервер")
+	assert.Equal(t, "prod", c.server, "вызов ушёл на вычисленный сервер")
 	assert.Equal(t, "kubectl_logs", c.tool)
 }
 
@@ -345,7 +345,7 @@ steps:
 func TestOnServerCannotEscapeFlowTools(t *testing.T) {
 	c := &recordingCaller{}
 	f := parseFlow(t, `
-tools: ["devops-k8s"]
+tools: ["staging"]
 steps:
   - name: logs
     on_server: "{{cluster}}"
@@ -363,17 +363,17 @@ steps:
 func TestOnServerNarrowsModelStepTools(t *testing.T) {
 	r := &fakeRunner{}
 	f := parseFlow(t, `
-tools: ["devops-k8s", "ift4-k8s", "dev-p1-k8s"]
+tools: ["staging", "prod", "sandbox"]
 steps:
   - name: pick
     on_server: "{{cluster}}"
     instruction: "найди под"
     save_as: pod
 `)
-	_, _, err := ExecuteWith(context.Background(), f, Deps{Runner: r}, map[string]string{"cluster": "dev-p1-k8s"})
+	_, _, err := ExecuteWith(context.Background(), f, Deps{Runner: r}, map[string]string{"cluster": "sandbox"})
 	require.NoError(t, err)
 	require.Len(t, r.seen, 1)
-	assert.Equal(t, []string{"dev-p1-k8s"}, r.seen[0].Tools,
+	assert.Equal(t, []string{"sandbox"}, r.seen[0].Tools,
 		"модель видит инструменты ОДНОГО кластера, а не всех трёх")
 }
 
@@ -409,7 +409,7 @@ steps:
 }
 
 // save_as рядом с call (а не внутри) — то, как его пишет автор: у шага модели
-// оно живёт именно там. Молчаливая потеря стоила судье скилл поиска по вики вердикта по
+// оно живёт именно там. Молчаливая потеря стоила судье поисковый скилл вердикта по
 // пустому списку, поэтому поле принимается на обоих уровнях.
 func TestCallStepAcceptsStepLevelSaveAs(t *testing.T) {
 	f := parseFlow(t, `
@@ -450,7 +450,7 @@ steps:
 // потока про него ничего не знает, его радиус задаёт builtin_tools скилла.
 func TestCallStepAllowsBuiltinServer(t *testing.T) {
 	f := parseFlow(t, `
-tools: ["jira"]
+tools: ["tracker"]
 steps:
   - name: draw
     call:
@@ -469,7 +469,7 @@ steps:
 // трассы бесследно, и выглядело это как отсутствие шага в описании.
 func TestCallStepDeniedByScopeIsTraced(t *testing.T) {
 	f := parseFlow(t, `
-tools: ["jira"]
+tools: ["tracker"]
 steps:
   - name: sneak
     call:

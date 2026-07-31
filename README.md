@@ -23,7 +23,7 @@
 ## Пример
 
 ```yaml
-tools: [devops-k8s, mcp-exec]
+tools: [staging, exec]
 steps:
   - name: understand                  # разбор запроса в поля
     instruction: |
@@ -34,7 +34,7 @@ steps:
     response_schema:
       type: object
       properties:
-        cluster: {enum: [devops-k8s, dev-p1-k8s]}
+        cluster: {enum: [staging, sandbox]}
         namespace: {type: string}
       required: [cluster, namespace]   # см. «Грабли»
     save_as: req
@@ -122,7 +122,7 @@ out, outcome, err := skill-engine.ExecuteWith(ctx, flow, skill-engine.Deps{
   ограничение держит: `maxLength: 600` → ровно 600 символов и валидный JSON.
 - **`for_each.in` берёт ИМЯ переменной, не шаблон.** `in: "{{parts}}"` даёт ноль
   итераций и отчитывается успехом (движок теперь такое отвергает).
-- **Конверт mcp-exec — не полезная нагрузка.** `{{findings}}` это
+- **Конверт exec — не полезная нагрузка.** `{{findings}}` это
   `{"exit_code":…,"stdout":"…"}`; циклу и аргументам нужен `.stdout`.
 
 Проверять описания статикой стоит до запуска: стыки шагов — то место, где
