@@ -1,0 +1,57 @@
+# Вычитка текста по своду правил.
+#
+# Показывает ассет-СПРАВОЧНИК: он подставляется в текст инструкции
+# ({{asset:style}}), потому что бесполезен, если модель его не прочитает.
+# Сравните с expenses.yaml, где код уходит по ссылке МИМО модели.
+
+skill_engine_version: "1.0.0"
+skill_version: "1.0.0"
+name: proofread
+description: Найти в тексте нарушения редакционных правил.
+role: reader
+kind: leaf
+
+workflow:
+  assets:
+    style:
+      kind: text
+      description: свод редакционных правил
+      content: |
+        1. Без канцелярита: «осуществляется» → «делается».
+        2. Числа до десяти — словами, дальше цифрами.
+        3. Никаких «более лучше», «в связи с тем что».
+        4. Одна мысль — одно предложение.
+
+  steps:
+    - name: check
+      instruction: |
+        Правила:
+        {{asset:style}}
+
+        Текст:
+        {{input}}
+
+        Найди нарушения. По каждому: цитата, номер правила, как переписать.
+        Нарушений нет — так и скажи, не выдумывай.
+      tools: []
+      response_schema:
+        type: object
+        properties:
+          issues:
+            type: array
+            items:
+              type: object
+              properties:
+                quote: {type: string}
+                rule: {type: integer}
+                fix: {type: string, maxLength: 400}
+              required: [quote, rule, fix]
+        required: [issues]
+      save_as: found
+
+    - name: report
+      instruction: |
+        Найденное: {{found}}
+
+        Перескажи человеку: цитата → как переписать. Пусто — «нарушений нет».
+      tools: []

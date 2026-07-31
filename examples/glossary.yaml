@@ -1,0 +1,55 @@
+# Перевод глоссария: пройти по списку терминов и перевести каждый.
+#
+# Показывает `for_each`: `in` берёт ИМЯ переменной, а не шаблон `{{...}}` —
+# движок такое отвергает на валидации. Результаты итераций сводятся в
+# `collect`, и шаг ответа работает уже с ними.
+
+skill_engine_version: "1.0.0"
+skill_version: "1.0.0"
+name: glossary
+description: Перевести список терминов, сохранив принятые в отрасли варианты.
+role: reader
+kind: leaf
+
+workflow:
+  assets:
+    known:
+      kind: text
+      description: устоявшиеся переводы, которые нельзя менять
+      content: |
+        commit — коммит (не «фиксация»)
+        merge request — мерж-реквест
+        rollback — откат
+        latency — задержка (не «латентность»)
+
+  steps:
+    - name: split
+      instruction: |
+        Список терминов: {{input}}
+        Верни термины по одному в строке, без нумерации и пояснений.
+      tools: []
+      save_as: terms
+
+    - for_each:
+        in: terms
+        as: term
+        collect: translated
+        max_iterations: 50
+        steps:
+          - name: translate
+            instruction: |
+              Устоявшиеся переводы:
+              {{asset:known}}
+
+              Термин: {{term}}
+
+              Дай перевод. Термин есть в списке выше — бери оттуда дословно.
+              Строкой «термин — перевод», без пояснений.
+            tools: []
+            save_as: translated
+
+    - name: report
+      instruction: |
+        Переводы: {{translated}}
+        Собери их в таблицу «термин | перевод». Ничего не добавляй.
+      tools: []

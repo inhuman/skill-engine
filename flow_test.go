@@ -436,7 +436,7 @@ func TestDelegateIsTraced(t *testing.T) {
 steps:
   - name: ask_other
     delegate:
-      skill: file-ticket
+      skill: ticket
       task: разбери тикет
       save_as: out
 `), &f))
@@ -447,7 +447,7 @@ steps:
 	require.Len(t, outcome.Steps, 1, "делегирование не оставило следа")
 	assert.Equal(t, "delegate", outcome.Steps[0].Kind)
 	assert.Equal(t, "ok", outcome.Steps[0].Outcome)
-	assert.Contains(t, outcome.Steps[0].Reason, "file-ticket", "в следе не видно, какому скиллу отдали работу")
+	assert.Contains(t, outcome.Steps[0].Reason, "ticket", "в следе не видно, какому скиллу отдали работу")
 }
 
 // Отказ делегата тоже обязан быть в следе: под политикой continue он иначе
@@ -458,7 +458,7 @@ func TestDelegateFailureIsTraced(t *testing.T) {
 steps:
   - name: ask_other
     delegate:
-      skill: file-ticket
+      skill: ticket
       task: разбери тикет
       save_as: out
       on_error: continue
@@ -588,18 +588,18 @@ steps:
       branches:
         - - name: probe_wiki
             when: pick.wiki == true
-            delegate: {skill: скилл поиска по вики, task: t, save_as: from_wiki}
-        - - name: probe_jira
-            when: pick.jira == true
-            delegate: {skill: file-ticket, task: t, save_as: from_jira}
+            delegate: {skill: поисковый скилл, task: t, save_as: from_wiki}
+        - - name: probe_tracker
+            when: pick.tracker == true
+            delegate: {skill: ticket, task: t, save_as: from_tracker}
 `), &f))
 
 	vars, _, err := ExecuteWith(t.Context(), &f, Deps{Delegate: constDelegate("данные вики")},
-		map[string]string{"pick": `{"wiki":true,"jira":false}`})
+		map[string]string{"pick": `{"wiki":true,"tracker":false}`})
 	require.NoError(t, err)
 
 	assert.Contains(t, vars["findings"], "данные вики")
-	assert.Contains(t, vars["findings"+SkippedSuffix], "probe_jira",
+	assert.Contains(t, vars["findings"+SkippedSuffix], "probe_tracker",
 		"пропущенная ветка не видна следующему шагу")
 	assert.NotContains(t, vars["findings"+SkippedSuffix], "probe_wiki")
 }

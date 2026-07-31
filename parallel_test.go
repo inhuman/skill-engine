@@ -30,19 +30,19 @@ func (d *recordingDelegate) Delegate(_ context.Context, skill, task string) (str
 
 // delegate передаёт работу другому скиллу — то, чем заняты composite-скиллы.
 func TestDelegateStep(t *testing.T) {
-	d := &recordingDelegate{out: map[string]string{"file-ticket": "симптом: падает на старте"}}
+	d := &recordingDelegate{out: map[string]string{"ticket": "симптом: падает на старте"}}
 	f := parseFlow(t, `
 steps:
   - name: read_ticket
     delegate:
-      skill: file-ticket
+      skill: ticket
       task: "разбери тикет {{key}}"
       save_as: ticket
 `)
 	vars, _, err := ExecuteWith(context.Background(), f, Deps{Delegate: d}, map[string]string{"key": "PROJ-1"})
 	require.NoError(t, err)
 	assert.Equal(t, "симптом: падает на старте", vars["ticket"])
-	assert.Equal(t, []string{"file-ticket: разбери тикет PROJ-1"}, d.calls, "задача с подстановкой")
+	assert.Equal(t, []string{"ticket: разбери тикет PROJ-1"}, d.calls, "задача с подстановкой")
 }
 
 // Ветки НЕ видят переменных друг друга: иначе исход зависел бы от того, кто

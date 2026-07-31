@@ -31,7 +31,7 @@ func TestAssetGoesIntoCallArgs(t *testing.T) {
 	c := &recordingCaller{out: "готово"}
 	a := &fakeAssets{content: map[string]string{"chart": "import sys\nprint('ok')"}}
 	f := parseFlow(t, `
-tools: ["mcp-exec"]
+tools: ["exec"]
 assets:
   chart:
     kind: code
@@ -41,7 +41,7 @@ assets:
 steps:
   - name: draw
     call:
-      tool: mcp-exec:exec
+      tool: exec:exec
       args:
         code: {from: "asset:chart"}
       save_as: out
@@ -113,32 +113,50 @@ steps:
 
 // Связки полей проверяются ДО исполнения: ошибку в объявлении надо видеть при
 // написании скилла, а не при первом запуске у пользователя.
-func TestAssetValidation(t *testing.T) {
-	for name, src := range map[string]string{
-		"inline без content": `assets: {a: {kind: text, source: inline}}`,
-		"внешний без ref":    `assets: {a: {kind: data, source: mcp}}`,
-		"code без lang":      `assets: {a: {kind: code, source: inline, content: "x"}}`,
-		"чужой источник":     `assets: {a: {kind: data, source: url, ref: "https://x"}}`,
-		"кривой deliver":     `assets: {a: {kind: text, source: inline, content: "x", deliver: куда-то}}`,
-	} {
-		t.Run(name, func(t *testing.T) {
-			f := parseFlow(t, src+"\nsteps: [{set: {var: a, value: b}}]")
-			require.Error(t, f.Validate())
-		})
-	}
+// Валидация ассета проверяет ФОРМУ, а не словарь: движок не знает, какие у
+// приложения бывают источники и роды нагрузки, и отвергать незнакомое значение
+// значило бы отвергать чужие. Знает он одно — содержимое либо здесь, либо по
+// адресу.
+func TestAssetValidationChecksShapeNotVocabulary(t *testing.T) {
+	t.Run("отвергается", func(t *testing.T) {
+		for name, src := range map[string]string{
+			"ни content, ни ref":    `assets: {a: {kind: text}}`,
+			"и content, и ref":      `assets: {a: {content: "x", ref: "где-то"}}`,
+			"кривой on_unavailable": `assets: {a: {ref: "где-то", fetch: {on_unavailable: как-нибудь}}}`,
+		} {
+			t.Run(name, func(t *testing.T) {
+				f := parseFlow(t, src+"\nsteps: [{set: {var: a, value: b}}]")
+				require.Error(t, f.Validate())
+			})
+		}
+	})
+
+	t.Run("пропускается", func(t *testing.T) {
+		for name, src := range map[string]string{
+			"незнакомый источник": `assets: {a: {source: своё-хранилище, ref: "адрес"}}`,
+			"незнакомый род":      `assets: {a: {kind: чертёж, content: "x"}}`,
+			"незнакомый маршрут":  `assets: {a: {content: "x", deliver: в-очередь}}`,
+			"код без lang":        `assets: {a: {kind: code, content: "x"}}`,
+		} {
+			t.Run(name, func(t *testing.T) {
+				f := parseFlow(t, src+"\nsteps: [{set: {var: a, value: b}}]")
+				require.NoError(t, f.Validate(), "словарь приложения движок не судит")
+			})
+		}
+	})
 }
 
 // Маршрут доставки, объявленный ассетом, обязан доехать до аргументов вызова:
 // мост читает его из `_deliver`, и без переноса объявление — украшение.
 //
-// Живой случай: `скилл ревью` объявлял `deliver: reply` у ассета-рендера,
+// Живой случай: скилл объявлял `deliver: reply` у ассета-рендера,
 // вывод шага не помечался как ответ хода, и гейт публикации в MR отвергал ход
 // целиком («финальный шаг скилла не зафиксировал результат»).
 func TestAssetDeliverReachesCallArgs(t *testing.T) {
 	c := &recordingCaller{out: "## Ревью\nзамечаний нет"}
 	a := &fakeAssets{content: map[string]string{"render": "print('отчёт')"}}
 	f := parseFlow(t, `
-tools: ["mcp-exec"]
+tools: ["exec"]
 assets:
   render:
     kind: code
@@ -149,7 +167,7 @@ assets:
 steps:
   - name: render
     call:
-      tool: mcp-exec:exec
+      tool: exec:exec
       args:
         code: {from: "asset:render"}
       save_as: answer
@@ -166,7 +184,7 @@ func TestStepDeliverBeatsAssetDeliver(t *testing.T) {
 	c := &recordingCaller{out: "данные"}
 	a := &fakeAssets{content: map[string]string{"probe": "print(1)"}}
 	f := parseFlow(t, `
-tools: ["mcp-exec"]
+tools: ["exec"]
 assets:
   probe:
     kind: code
@@ -177,7 +195,7 @@ assets:
 steps:
   - name: probe
     call:
-      tool: mcp-exec:exec
+      tool: exec:exec
       args:
         code: {from: "asset:probe"}
         _deliver: {to: memory}
@@ -193,7 +211,7 @@ func TestAssetDeliverNoneInjectsNothing(t *testing.T) {
 	c := &recordingCaller{out: "данные"}
 	a := &fakeAssets{content: map[string]string{"calc": "print(2)"}}
 	f := parseFlow(t, `
-tools: ["mcp-exec"]
+tools: ["exec"]
 assets:
   calc:
     kind: code
@@ -204,7 +222,7 @@ assets:
 steps:
   - name: calc
     call:
-      tool: mcp-exec:exec
+      tool: exec:exec
       args:
         code: {from: "asset:calc"}
       save_as: out
@@ -216,7 +234,7 @@ steps:
 
 // Ассет по ссылке ВНУТРИ СПИСКА: `command: ["sh","-c",{from: "asset:x"}]`.
 // Форма не экзотическая — так задаётся запуск скрипта в k8s-job, и до перевода
-// скилл ревью в программу она была единственной рабочей. При переводе
+// такой скилл в программу она была единственной рабочей. При переводе
 // обёртка sh -c потерялась, содержимое ассета уехало в command СТРОКОЙ, и
 // инструмент отверг вызов схемой (ждал массив) — а увидели это только когда
 // починилась подстановка полей и аргументы перестали быть пустыми.
@@ -249,18 +267,18 @@ steps:
 // Хендл рабочей памяти в аргументах — это ССЫЛКА ({from: "<id>"}), а не строка.
 // Строкой скрипт получает идентификатор вместо данных и падает на разборе.
 //
-// Живой случай: скилл ревью/render получал stdin ["<json>", "mrctx-ab",
+// Живой случай: шаг рендера получал stdin ["<json>", "mrctx-ab",
 // "mrctx-ab"] и отвечал «RENDER_ERROR: stdin не парсится как поток JSON»;
 // доставлять было нечего, ревью не публиковалось. Форма потеряна при переводе
 // скилла в YAML — тот же класс, что и утраченная обёртка sh -c у батарей.
 func TestMemHandleRefStaysAReference(t *testing.T) {
 	c := &recordingCaller{out: "ok"}
 	f := parseFlow(t, `
-tools: ["mcp-exec"]
+tools: ["exec"]
 steps:
   - name: render
     call:
-      tool: mcp-exec:exec
+      tool: exec:exec
       args:
         stdin: ["{{findings}}", {from: "{{ctx.mem}}"}]
       save_as: out

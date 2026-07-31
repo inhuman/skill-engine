@@ -50,11 +50,18 @@ func TestEngineStaysSelfContained(t *testing.T) {
 	}
 }
 
-// external — импорт не из stdlib (путь со схемой домена в первом сегменте).
+// external — импорт не из stdlib (домен в первом сегменте) и не сам движок:
+// тесты из внешнего пакета импортируют его по имени, и это не зависимость, а
+// способ проверять публичный API снаружи.
 func external(imp string) bool {
+	if imp == selfModule {
+		return false
+	}
 	head, _, _ := strings.Cut(imp, "/")
 	return strings.Contains(head, ".")
 }
+
+const selfModule = "github.com/inhuman/skill-engine"
 
 func slicesContains(list []string, v string) bool {
 	for _, x := range list {

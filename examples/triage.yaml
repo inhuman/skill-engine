@@ -1,0 +1,52 @@
+# Составной скилл: ветвление и делегирование.
+#
+# Показывает, как гвард становится свойством формата: в ветке «код» вызова
+# в систему тикетов НЕТ — не потому, что об этом попросили, а потому, что
+# шага с таким вызовом в этой ветке не существует.
+
+skill_engine_version: "1.0.0"
+skill_version: "1.0.0"
+name: triage
+description: Разобрать сообщение об ошибке и завести тикет, если он нужен.
+role: investigator
+kind: composite
+
+meta:
+  owner: platform-team
+
+workflow:
+  steps:
+    - name: classify
+      instruction: |
+        Сообщение: {{input}}
+
+        Верни code — если ошибка в коде, runtime — если в окружении.
+      tools: []
+      one_of: [code, runtime]
+      save_as: verdict
+
+    - switch:
+        var: verdict
+        cases:
+          # Ошибка в коде: тикет не нужен, нужен разбор.
+          code:
+            - name: explain
+              instruction: |
+                Ошибка в коде: {{input}}
+                Объясни причину и что поправить.
+              tools: []
+
+          runtime:
+            - name: evidence
+              delegate:
+                skill: logs
+                task: "собери логи по симптому: {{input}}"
+              save_as: logs
+
+            - name: ticket
+              instruction: |
+                Симптом: {{input}}
+                Собранное: {{logs}}
+
+                Заведи тикет: заголовок и описание с фактами из собранного.
+              tools: [tracker]

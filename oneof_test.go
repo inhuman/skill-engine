@@ -44,7 +44,7 @@ func TestNormalizeOneOfNoConstraint(t *testing.T) {
 
 // Одно допустимое значение — часть другого (found ⊂ not_found). Простой подсчёт
 // вхождений засчитывал ответ обоим, оба слоя видели ничью и возвращали пустоту:
-// шаг молча оставался без значения. Живой случай: — скилл поиска по вики.
+// шаг молча оставался без значения. Живой случай: — поисковый скилл.
 func TestNormalizeOneOf_OverlappingValues(t *testing.T) {
 	allowed := []string{"found", "not_found"}
 	for _, c := range []struct{ in, want string }{
