@@ -1,0 +1,54 @@
+# IDE
+.idea/
+.vscode/
+
+# Локальная документация и заметки (не для публичной репы)
+docs/
+PLAN.md
+
+# Бинарники и артефакты тестов
+*.exe
+*.dll
+*.so
+*.dylib
+*.out
+*.test
+coverage.*
+
+# Окружение
+.env
+.env.local
+*.env
+
+# Временные файлы OS
+.DS_Store
+Thumbs.db
+
+# AI-инструменты: конфиги и контекст в репу не едут
+.claude
+.specify
+specs
+.cursor
+.cursorignore
+.cursorindexingignore
+.cursorrules
+.github/copilot-instructions.md
+.copilot
+.codeium
+.codeiumignore
+.windsurf
+.windsurfrules
+.aider*
+.continue
+.continuerc.json
+.gemini
+.dispatch
+.kiro
+.kilocode
+.qwen
+.qwenignore
+AGENTS.md
+GEMINI.md
+COPILOT.md
+CLAUDE.md
+QWEN.md
