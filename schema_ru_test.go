@@ -1,8 +1,6 @@
 package skillengine_test
 
 import (
-	"fmt"
-	"os"
 	"sort"
 	"testing"
 
@@ -23,10 +21,7 @@ import (
 func TestRussianSchemaMatchesStructure(t *testing.T) {
 	var en, ru any
 	require.NoError(t, yaml.Unmarshal([]byte(se.SchemaYAML), &en), "the embedded schema does not parse")
-
-	raw, err := os.ReadFile("skill.schema.ru.yaml")
-	require.NoError(t, err)
-	require.NoError(t, yaml.Unmarshal(raw, &ru), "the translation does not parse")
+	require.NoError(t, yaml.Unmarshal([]byte(se.SchemaRU), &ru), "the translation does not parse")
 
 	assert.Equal(t, skeleton(en), skeleton(ru),
 		"the schema and its translation diverge structurally — a field was added to one of them only")
@@ -61,12 +56,12 @@ func skeleton(v any) any {
 // $defs entry present in one and missing from the other means the translation
 // documents a format that does not exist.
 func TestRussianSchemaCoversSameDefs(t *testing.T) {
-	defsOf := func(t *testing.T, src []byte) []string {
+	defsOf := func(t *testing.T, src string) []string {
 		t.Helper()
 		var doc struct {
 			Defs map[string]any `yaml:"$defs"`
 		}
-		require.NoError(t, yaml.Unmarshal(src, &doc))
+		require.NoError(t, yaml.Unmarshal([]byte(src), &doc))
 		names := make([]string, 0, len(doc.Defs))
 		for name := range doc.Defs {
 			names = append(names, name)
@@ -75,9 +70,22 @@ func TestRussianSchemaCoversSameDefs(t *testing.T) {
 		return names
 	}
 
-	raw, err := os.ReadFile("skill.schema.ru.yaml")
-	require.NoError(t, err)
+	assert.Equal(t, defsOf(t, se.SchemaYAML), defsOf(t, se.SchemaRU),
+		"the set of $defs differs between skill.schema.yaml and its translation")
+}
 
-	assert.Equal(t, defsOf(t, []byte(se.SchemaYAML)), defsOf(t, raw),
-		fmt.Sprintf("the set of $defs differs between %s and its translation", "skill.schema.yaml"))
+// The translation must be EMBEDDED, not merely present in the repository: an
+// embedder gets the package through `go mod vendor`, which copies only what the
+// build references. A schema shown to a skill author who does not read English
+// is useless if it never arrives.
+func TestRussianSchemaIsEmbedded(t *testing.T) {
+	require.NotEmpty(t, se.SchemaRU, "the Russian schema is not embedded — vendoring will not carry it")
+
+	summary := se.SchemaSummaryRU(yaml.Unmarshal)
+	require.NotEmpty(t, summary)
+	assert.Contains(t, summary, "ФОРМАТ СКИЛЛА", "the summary's own headings stayed English")
+	assert.Contains(t, summary, "playbook", "the field list is missing")
+
+	assert.NotEqual(t, se.SchemaSummary(yaml.Unmarshal), summary,
+		"both summaries came out identical — one of them reads the wrong schema")
 }

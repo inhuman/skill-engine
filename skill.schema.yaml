@@ -895,6 +895,13 @@ $defs:
           hands this to the application's resolver as is. Contents by kind are
           in examples/vocabulary.yaml.
 
+          Which means VALIDATING THE KEYS IS THE RESOLVER'S JOB, and it is not
+          optional. The openness is paid for: `params: {langauge: python}`
+          passes both the parser and this schema, where a misspelled `lang`
+          field could not exist at all. Only the resolver knows which keys are
+          legal for a given kind — and an unread key means the linter never
+          checks the syntax and the failure surfaces in production.
+
       deliver:
         type: string
         description: |

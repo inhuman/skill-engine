@@ -13,6 +13,36 @@ import (
 	se "github.com/inhuman/skill-engine"
 )
 
+// exampleFiles lists the examples that are SKILLS. vocabulary.yaml is a
+// vocabulary of values rather than a skill, and anything reading a skill's
+// fields would draw the wrong conclusion from it.
+func exampleFiles(t *testing.T) []string {
+	t.Helper()
+	all, err := filepath.Glob(filepath.Join("examples", "*.yaml"))
+	require.NoError(t, err)
+	require.NotEmpty(t, all, "the examples are gone")
+
+	var skills []string
+	for _, path := range all {
+		var doc struct {
+			Name string `yaml:"name"`
+		}
+		require.NoError(t, yaml.Unmarshal(readFile(t, path), &doc))
+		if doc.Name != "" {
+			skills = append(skills, path)
+		}
+	}
+	require.NotEmpty(t, skills)
+	return skills
+}
+
+func readFile(t *testing.T, path string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	return raw
+}
+
 // readWorkflow pulls the flow description out of an example file.
 //
 // The node is taken BY VALUE, not by pointer: yaml.v3 does not fill in a

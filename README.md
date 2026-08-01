@@ -156,15 +156,26 @@ over as a structure (`Outcome`) and through callbacks (`OnStepStart` — before 
 step, for showing work to a human; `OnStep` — right after). Turning that into
 telemetry is the embedding application's job.
 
-The format's schema is `skill.schema.yaml` (go:embed) — the source of truth,
-and the one `SchemaSummary` hands to a model. `skill.schema.ru.yaml` is a
-Russian translation of it: usable for validation, never read by the engine; a
-test keeps the two structurally identical, so only the descriptions differ.
+The format's schema is `skill.schema.yaml` — the source of truth, embedded as
+`SchemaYAML`, with `SchemaSummary` giving the compact version to hand a model.
+`SchemaRU` / `SchemaSummaryRU` are the same in Russian: also embedded, so
+`go mod vendor` carries them to whoever shows the schema to a skill author. A
+test keeps the two structurally identical, so only the prose differs, and
+validation always goes against the English one.
 
 The format version is in `version.go`; `CheckEngineVersion` rejects both a
 description from the future and one of a foreign major: the latter would parse
 without a single complaint, silently losing fields the structs no longer have.
-Format changes are in `CHANGELOG.md`.
+Since skills live in a user's storage and are not updated with a deploy, the
+edits that a major needs ship with the code that makes them:
+
+```go
+out, changed, err := skillengine.Migrate(raw)
+```
+
+`Migrate` edits the file as text — comments, key order and block scalars
+survive — and does not validate the result; parse and validate it as usual
+afterwards. Format changes and what each migration does are in `CHANGELOG.md`.
 
 ## Invariants paid for with live failures
 
