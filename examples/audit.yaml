@@ -1,0 +1,72 @@
+# Auditing a document: judge it, then render the verdict.
+#
+# Shows the two fields a live catalogue asked for:
+#
+#   1. `profiles` — the classifier steps share one envelope (a small model,
+#      temperature 0, no tools) while every instruction differs. What repeats
+#      is the configuration, not the step.
+#   2. `on_empty` — a judging step that returns nothing used to be followed by
+#      a rendering step that ran `ok` on the emptiness, and the failure only
+#      surfaced at the very end. Here the emptiness decides what happens.
+
+skill_engine_version: "2.1.0"
+skill_version: "1.0.0"
+name: audit
+description: Check a document against the rules and report the findings.
+role: analyzer
+kind: leaf
+
+servers: [storage]
+
+workflow:
+  tools: [storage]
+
+  profiles:
+    # `tools: []` here is the guard, not "unset": these steps physically cannot
+    # go anywhere, and the profile carries that for all of them.
+    classifier:
+      model: vllm/gemma-4-e4b
+      sampling: {temperature: 0}
+      tools: []
+
+  steps:
+    - name: understand
+      profile: classifier
+      instruction: |
+        Request: {{input}}
+
+        kind — audit, if a document is to be checked; other, if not.
+      one_of: [audit, other]
+      # An ambiguous answer stores nothing even though the model produced text,
+      # and an empty value would silently take the switch to its default.
+      on_empty: fail
+      save_as: kind
+
+    - if:
+        cond: "kind == other"
+        then:
+          - exit: {reason: "the request is not about auditing a document"}
+
+    - name: judge
+      profile: classifier          # the model and the guard come from the profile
+      sampling: {temperature: 0.2}  # ...and this one step wants a little warmth
+      instruction: |
+        Document: {{input}}
+
+        List the rule violations. Quote each one. No violations — say so.
+      # A transient silence is worth one more attempt; still silent afterwards
+      # is a failure, and `on_error` decides what that costs.
+      on_empty: retry
+      on_empty_retries: 2
+      on_error: continue
+      save_as: findings
+
+    - name: report
+      instruction: |
+        Findings: {{findings}}
+
+        Retell them for a human: quote → which rule → how to fix.
+      tools: []
+      # The turn must answer something even when the judge stayed silent.
+      on_empty: use
+      on_empty_value: "The audit produced nothing — run it again or check the document."

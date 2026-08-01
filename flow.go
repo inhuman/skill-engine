@@ -38,6 +38,10 @@ type Flow struct {
 	// Declared in the skill rather than in a step: the same payload is often
 	// consumed by several steps.
 	Assets map[string]Asset `yaml:"assets,omitempty"`
+	// Profiles — named sets of step parameters (see profile.go). Folded into
+	// the steps that name them before validation, so nothing downstream knows
+	// they existed.
+	Profiles map[string]Profile `yaml:"profiles,omitempty"`
 }
 
 // Step — a single step. Exactly one of Run/Switch/If/Set must be filled in;
@@ -77,6 +81,11 @@ type Step struct {
 	// Permissions are not weakened: the SUBSTITUTED name is checked, and it must
 	// belong to the flow's set.
 	OnServer string `yaml:"on_server,omitempty"`
+
+	// Profile — the name of a set of generation parameters to inherit (see
+	// profile.go). Whatever the step spells out itself wins; the rest comes
+	// from the profile.
+	Profile string `yaml:"profile,omitempty"`
 
 	// When — the step's applicability condition (same syntax as If.Cond). False
 	// → the step is skipped and the flow moves on.
@@ -131,6 +140,13 @@ type Call struct {
 	SaveAs string `yaml:"save_as,omitempty"`
 	// OnError — what to do on failure. Default is Abort, as for Run.
 	OnError ErrorPolicy `yaml:"on_error,omitempty"`
+	// OnEmpty — what an empty tool result means (see empty.go). A tool that
+	// returned nothing is the same class as a model that said nothing, so the
+	// field exists on both paths; `retry` is the exception, refused here
+	// because a call cannot be repeated.
+	OnEmpty EmptyPolicy `yaml:"on_empty,omitempty"`
+	// OnEmptyValue — what to store instead, for OnEmpty: use. Supports {{var}}.
+	OnEmptyValue string `yaml:"on_empty_value,omitempty"`
 }
 
 // Run — a step executed by the model.
@@ -171,6 +187,15 @@ type Run struct {
 
 	// OnError — what to do when the step could not. Default is Abort.
 	OnError ErrorPolicy `yaml:"on_error,omitempty"`
+
+	// OnEmpty — what an empty result means (see empty.go). Default is
+	// EmptyContinue, which is what the engine did before the field existed.
+	OnEmpty EmptyPolicy `yaml:"on_empty,omitempty"`
+	// OnEmptyValue — what to store instead, for OnEmpty: use. Supports {{var}}.
+	OnEmptyValue string `yaml:"on_empty_value,omitempty"`
+	// OnEmptyRetries — how many times OnEmpty: retry runs the step again.
+	// Unset = DefaultEmptyRetries.
+	OnEmptyRetries int `yaml:"on_empty_retries,omitempty"`
 
 	// OneOf — the allowed values of the step's result. Set → the result is
 	// normalised: whichever of the listed values is found in the answer is
@@ -377,6 +402,13 @@ func validateCall(c *Call, at string, serverFromStep bool) error {
 	return validateErrPolicy(c.OnError, at)
 }
 
+// validateCallEmpty checks a call's emptiness policy. Separate from
+// validateCall because that one returns early on the server-from-step path,
+// and this rule applies to both.
+func validateCallEmpty(c *Call, at string) error {
+	return validateEmptyPolicy(c.OnEmpty, c.OnEmptyValue, 0, true, at)
+}
+
 func validateErrPolicy(p ErrorPolicy, at string) error {
 	switch p {
 	case "", PolicyAbort, PolicyContinue, PolicySkip:
@@ -549,6 +581,15 @@ func (f *Flow) Validate() error {
 	if err := validateAssets(f.Assets); err != nil {
 		return fmt.Errorf("skill-engine: %w", err)
 	}
+	if err := validateProfiles(f.Profiles); err != nil {
+		return fmt.Errorf("skill-engine: %w", err)
+	}
+	// Before validateSteps, deliberately: from here on a step that inherited
+	// its model from a profile HAS a model, so every check downstream — the
+	// response_schema pairing above all — sees the step as it will execute.
+	if err := applyProfiles(f.Steps, f.Profiles, "steps"); err != nil {
+		return err
+	}
 	return validateSteps(f.Steps, "steps")
 }
 
@@ -566,6 +607,21 @@ func normalizeSteps(steps []Step, path string) error {
 		at := fmt.Sprintf("%s[%d]", path, i)
 		if s.Name != "" {
 			at = fmt.Sprintf("%s (%s)", at, s.Name)
+		}
+		// A call step's on_empty written at step level, where on_error and
+		// save_as also live for a model step. Left in place it would sit in Run,
+		// which a call step never reads — declared, valid, and doing nothing.
+		if s.Call != nil && s.Run != nil && strings.TrimSpace(s.Run.Instruction) == "" {
+			switch {
+			case s.Run.OnEmpty != "" && s.Call.OnEmpty != "" && s.Run.OnEmpty != s.Call.OnEmpty:
+				return fmt.Errorf("%s: on_empty given twice and differently (%q on the step, %q inside call)",
+					at, s.Run.OnEmpty, s.Call.OnEmpty)
+			case s.Run.OnEmpty != "" && s.Call.OnEmpty == "":
+				s.Call.OnEmpty, s.Run.OnEmpty = s.Run.OnEmpty, ""
+			}
+			if s.Run.OnEmptyValue != "" && s.Call.OnEmptyValue == "" {
+				s.Call.OnEmptyValue, s.Run.OnEmptyValue = s.Run.OnEmptyValue, ""
+			}
 		}
 		if s.Run != nil && strings.TrimSpace(s.Run.Instruction) == "" && s.Run.SaveAs != "" {
 			switch {
@@ -605,6 +661,9 @@ func validateSteps(steps []Step, path string) error {
 			}
 			if s.Run.MaxCalls < 0 {
 				return fmt.Errorf("%s: max_calls is negative", at)
+			}
+			if err := validateEmptyPolicy(s.Run.OnEmpty, s.Run.OnEmptyValue, s.Run.OnEmptyRetries, false, at); err != nil {
+				return err
 			}
 		}
 		// A response_schema without a model is a silent hole: the decoding
@@ -658,6 +717,9 @@ func validateSteps(steps []Step, path string) error {
 		if s.Call != nil {
 			n++
 			if err := validateCall(s.Call, at, s.OnServer != ""); err != nil {
+				return err
+			}
+			if err := validateCallEmpty(s.Call, at); err != nil {
 				return err
 			}
 		}
