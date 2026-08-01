@@ -193,28 +193,71 @@ func (s *state) runStep(ctx context.Context, step Step) (bool, error) {
 		s.traceCalls(step, outcomeFor(err), err.Error(), res.Calls, res.CallsFailed, started)
 		return s.onError(step, err)
 	}
-	// A step that finished without a single word is a failure, not a success:
-	// the work it existed for was not done. Live class — gpt-oss puts the
-	// answer into reasoning_content and leaves content empty; the step was
-	// recorded as ok while the turn answered with an internal variable. A
-	// failure must be loud.
-	switch {
-	// The executor's own reason is more precise than anything derived here —
-	// it comes first.
-	case res.Note != "":
-		s.traceCalls(step, "degraded", res.Note, res.Calls, res.CallsFailed, started)
-	case strings.TrimSpace(res.Text) == "":
-		s.traceCalls(step, "degraded", "step produced no text", res.Calls, res.CallsFailed, started)
-	// Every call failed — the step did NOT do its job, even if some text came
-	// from the model. Otherwise a turn with seven rejected calls is recorded as
-	// a success and the reason is hunted for in pod logs.
-	case res.Calls > 0 && res.CallsFailed == res.Calls:
-		s.traceCalls(step, "degraded",
-			fmt.Sprintf("all tool calls failed (%d)", res.CallsFailed),
-			res.Calls, res.CallsFailed, started)
-	default:
-		s.traceCalls(step, "ok", "", res.Calls, res.CallsFailed, started)
+
+	// The value, not the raw text: with `one_of` an ambiguous answer produces
+	// text and stores nothing, and it is the stored value that flows on.
+	value := normalizeOneOf(res.Text, run.OneOf)
+	policy, replacement := emptyPolicyOf(step)
+	calls, failed := res.Calls, res.CallsFailed
+
+	// on_empty: retry — run it again before deciding. The attempts are counted
+	// into the trace: the step really did make those calls.
+	if isBlankResult(value) && policy == EmptyRetry {
+		for left := emptyRetriesOf(run); left > 0 && isBlankResult(value); left-- {
+			again, aerr := s.runner.Run(ctx, req)
+			calls, failed = calls+again.Calls, failed+again.CallsFailed
+			if aerr == nil {
+				aerr = again.Err
+			}
+			if aerr != nil {
+				s.traceCalls(step, outcomeFor(aerr), aerr.Error(), calls, failed, started)
+				return s.onError(step, aerr)
+			}
+			res.Note = again.Note
+			value = normalizeOneOf(again.Text, run.OneOf)
+		}
 	}
+
+	if isBlankResult(value) {
+		switch policy {
+		case EmptyUse:
+			value = s.expand(replacement)
+			s.traceCalls(step, "ok", "on_empty: used the declared value", calls, failed, started)
+		// EmptyRetry lands here with its retries spent, and is treated as
+		// EmptyFail: the author asked to retry because empty was not
+		// acceptable, so carrying on now would be the very silence this
+		// exists to break. `on_error: continue` next to it is how a skill
+		// says "retry, then tolerate".
+		case EmptyFail, EmptyRetry:
+			s.traceCalls(step, "degraded", errEmptyResult.Error(), calls, failed, started)
+			return s.onError(step, errEmptyResult)
+		default:
+			// EmptyContinue, and what the engine did before the field existed.
+			s.traceEmptyContinue(step, res, calls, failed, started)
+		}
+	} else {
+		// A step that finished without a single word is a failure, not a
+		// success: the work it existed for was not done. Live class — a model
+		// putting the answer into reasoning_content and leaving content empty;
+		// the step was recorded as ok while the turn answered with an internal
+		// variable. A failure must be loud.
+		switch {
+		// The executor's own reason is more precise than anything derived here
+		// — it comes first.
+		case res.Note != "":
+			s.traceCalls(step, "degraded", res.Note, calls, failed, started)
+		// Every call failed — the step did NOT do its job, even if some text
+		// came from the model. Otherwise a turn with seven rejected calls is
+		// recorded as a success and the reason is hunted for in pod logs.
+		case calls > 0 && failed == calls:
+			s.traceCalls(step, "degraded",
+				fmt.Sprintf("all tool calls failed (%d)", failed),
+				calls, failed, started)
+		default:
+			s.traceCalls(step, "ok", "", calls, failed, started)
+		}
+	}
+
 	// A step without save_as is the turn's final answer, not discarded work.
 	// Its result used to be stored nowhere: the skill ran, there was nothing to
 	// answer with, and the turn handed out the longest internal variable — that
@@ -224,10 +267,21 @@ func (s *state) runStep(ctx context.Context, step Step) (bool, error) {
 		target = AnswerVar
 	}
 	if target != "" {
-		s.set(target, normalizeOneOf(res.Text, run.OneOf))
+		s.set(target, value)
 		s.noteAnswerWriter(target, stepKind(step))
 	}
 	return false, nil
+}
+
+// traceEmptyContinue records an empty result the skill tolerates, exactly as
+// the engine did before on_empty existed: the executor's own reason wins,
+// otherwise the generic one.
+func (s *state) traceEmptyContinue(step Step, res Result, calls, failed int, started time.Time) {
+	reason := res.Note
+	if reason == "" {
+		reason = "step produced no text"
+	}
+	s.traceCalls(step, "degraded", reason, calls, failed, started)
 }
 
 // callStep calls a tool directly, without the model.
@@ -266,7 +320,28 @@ func (s *state) callStep(ctx context.Context, step Step) (bool, error) {
 		s.trace(step, outcomeFor(err), err.Error(), 1, started)
 		return s.onError(step, err)
 	}
-	s.trace(step, "ok", "", 1, started)
+
+	// A tool that returned nothing is the same class as a model that said
+	// nothing — the emptiness travels on and the next step answers from it. The
+	// mechanism therefore exists on both paths; `retry` is the one exception,
+	// refused at validation because a call cannot be repeated.
+	if policy, replacement := emptyPolicyOf(step); isBlankResult(out) {
+		switch policy {
+		case EmptyUse:
+			out = s.expand(replacement)
+			s.trace(step, "ok", "on_empty: used the declared value", 1, started)
+		case EmptyFail:
+			s.trace(step, "degraded", errEmptyResult.Error(), 1, started)
+			return s.onError(step, errEmptyResult)
+		default:
+			// EmptyContinue: `ok`, as before this field existed. A tool
+			// legitimately answers "nothing found", and the engine has no way
+			// to tell that from a broken one.
+			s.trace(step, "ok", "", 1, started)
+		}
+	} else {
+		s.trace(step, "ok", "", 1, started)
+	}
 	if call.SaveAs != "" {
 		s.set(call.SaveAs, out)
 		s.noteAnswerWriter(call.SaveAs, stepKind(step))

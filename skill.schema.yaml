@@ -317,6 +317,38 @@ $defs:
           possible outcome: the answer looks normal and never gets checked.
 
   # ─────────────────────────────────────────────────────────────────────
+  Profile:
+    type: object
+    additionalProperties: false
+    description: |
+      A named set of generation parameters a step inherits with `profile:`.
+
+      Merging: a field written ON THE STEP wins, anything the step leaves out
+      comes from the profile. `sampling` is replaced WHOLE rather than merged
+      key by key — a half-inherited block turns "why is my top_k from the
+      profile and my temperature my own" into a question at every debugging
+      session.
+
+      `tools: []` here means an EMPTY SET, not "unset", exactly as on a step:
+      the empty set is the guard "do not go to that source", and a profile that
+      could not express it would force the guard to be repeated by hand on every
+      step — which is what profiles exist to stop.
+    properties:
+      model: {type: string}
+      sampling: {$ref: "#/$defs/Sampling"}
+      tools:
+        type: array
+        items: {type: string}
+      max_calls:
+        type: integer
+        minimum: 0
+      max_tool_errors:
+        type: integer
+        minimum: 0
+      on_error:
+        enum: [abort, continue, skip]
+
+  # ─────────────────────────────────────────────────────────────────────
   Workflow:
     type: object
     required: [steps]
@@ -327,6 +359,20 @@ $defs:
         minItems: 1
         items: {$ref: "#/$defs/Step"}
         description: "The steps, executed in order."
+      profiles:
+        type: object
+        additionalProperties: {$ref: "#/$defs/Profile"}
+        description: |
+          Named sets of step parameters, inherited by `profile:` on a step.
+
+          Why: in a live catalogue of 168 steps the instructions are nearly all
+          unique while the shape around them repeats by the dozen — 32 steps
+          carrying the same model, temperature and empty tool set, another 46 a
+          second such set. What repeats is not the step but its configuration.
+
+          A profile holds no instruction, and cannot: the envelope is the part
+          worth sharing, the work is the part worth writing every time.
+
       assets:
         type: object
         additionalProperties: {$ref: "#/$defs/Asset"}
@@ -502,6 +548,17 @@ $defs:
           For instance, a task matches the skill only partially. `when:` makes
           the skip VISIBLE in the events — otherwise the turn "sometimes gives
           the right answer, sometimes not", with no visible reason.
+      profile:
+        type: string
+        description: |
+          The name of a profile (see `profiles`) to inherit parameters from.
+          Whatever the step spells out itself wins.
+
+          Only on an instruction step: a profile carries generation parameters,
+          and on a step that generates nothing they have no effect — accepting
+          it silently would leave the author believing the step runs on the
+          profile's model.
+
       save_as:
         type: string
         description: "The variable for the result. Empty — the result is not stored."
@@ -515,6 +572,57 @@ $defs:
             skip     — skip the rest of the CURRENT branch.
           A permission refusal is marked DENIED:, any other breakage ERROR:; the
           policy tells them apart, an `is empty` branch does not.
+
+      on_empty:
+        enum: [continue, fail, retry, use]
+        default: continue
+        description: |
+          What an empty result MEANS for this step.
+            continue — legal, the flow moves on (the default, and what the
+                       engine did before this field existed);
+            fail     — the step counts as failed, and `on_error` decides;
+            retry    — run the step again, `on_empty_retries` times; still
+                       empty afterwards is treated as `fail`;
+            use      — store `on_empty_value` instead and carry on.
+
+          Why it exists: an empty result used to be indistinguishable from
+          content downstream — the next step honestly ran `ok` on an empty
+          input, and the user got an empty report wearing the look of a
+          successful one. Live case: a judging step returned nothing, the
+          rendering step ran `ok`, and the failure surfaced at an external
+          publication gate a whole turn's work later.
+
+          Empty means an empty string after trimming, judged on the value the
+          step WOULD STORE — with `one_of` an ambiguous answer produces text and
+          stores nothing, and it is the stored value that flows on. Nothing
+          deeper is recognised: an empty JSON object would mean the engine had
+          started interpreting content, which it does nowhere else.
+
+          A dictionary of outcomes rather than allow_empty: true/false, and the
+          same shape as `on_error` on purpose — a boolean would have to grow the
+          first time "empty is a valid answer" needs telling apart from "empty
+          is a failure", and that is already three cases.
+
+          `retry` is refused on a `call` step: a call cannot be repeated, and a
+          repeated call with a side effect is a second ticket, a second merge
+          request, a second e-mail.
+
+      on_empty_value:
+        type: string
+        description: |
+          What to store when `on_empty: use` fires. Supports `{{var}}`.
+          Meaningless — and refused — with any other policy.
+
+      on_empty_retries:
+        type: integer
+        minimum: 1
+        maximum: 5
+        default: 1
+        description: |
+          How many times `on_empty: retry` runs the step again, beyond the first
+          attempt. Bounded on purpose: the format has no unlimited anything, and
+          a step retried without a bound brings back exactly the runaway it
+          exists to prevent.
 
   # ─────────────────────────────────────────────────────────────────────
   # Pairings checked by the schema (the error is visible in the editor, not in
@@ -555,6 +663,21 @@ $defs:
       save_as: {type: string}
       on_error:
         enum: [abort, continue, skip]
+      on_empty:
+        enum: [continue, fail, use]
+        default: continue
+        description: |
+          What an empty tool result means — see `on_empty` on a step. A tool
+          that returned nothing is the same class as a model that said nothing,
+          so the field exists on both paths.
+
+          `retry` is absent here, and refused if written: a call cannot be
+          repeated. Note also that the default keeps a call step's trace at
+          `ok`, unchanged — a tool legitimately answers "nothing found", and the
+          engine cannot tell that from a broken one.
+      on_empty_value:
+        type: string
+        description: "What to store when `on_empty: use` fires. Supports {{var}}."
 
   # ─────────────────────────────────────────────────────────────────────
   Sampling:

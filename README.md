@@ -113,6 +113,46 @@ steps:
 | `delegate` | delegating to another skill (the application decides how to execute it) |
 | `exit` | "matched by mistake" — the turn returns to its ordinary path |
 
+## Shared step settings
+
+What repeats across a catalogue is usually not the step but its envelope. A
+`profile` is that envelope under a name; anything the step spells out itself
+wins, and `sampling` is replaced whole rather than merged key by key:
+
+```yaml
+profiles:
+  classifier:
+    model: small/model
+    sampling: {temperature: 0}
+    tools: []                    # an empty SET — the guard travels with it
+steps:
+  - name: understand
+    profile: classifier
+    instruction: …               # the work stays per-step
+  - name: judge
+    profile: classifier
+    sampling: {temperature: 0.2} # one field, overridden here only
+    instruction: …
+```
+
+## When a step comes back empty
+
+An empty result used to be indistinguishable from content downstream: the next
+step honestly ran `ok` on an empty input and the turn produced an empty answer
+wearing the look of a successful one. `on_empty` says what the emptiness means:
+
+| value | what happens |
+|---|---|
+| `continue` | legal, the flow moves on — the default, and the old behaviour |
+| `fail` | the step counts as failed; `on_error` decides from there |
+| `retry` | run it again `on_empty_retries` times (1..5); still empty is then `fail` |
+| `use` | store `on_empty_value` instead (supports `{{var}}`) |
+
+Empty means an empty string after trimming, judged on the value the step *would
+store* — with `one_of` an ambiguous answer produces text and stores nothing, and
+it is the stored value that flows on. It works on `call` steps too, except
+`retry`: a call cannot be repeated.
+
 ## Variables
 
 - `save_as` puts a step's result into a variable; **a step without `save_as`
