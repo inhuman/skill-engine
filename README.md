@@ -228,6 +228,14 @@ not guessed at. Format changes and what each migration does are in
   on a loop with failed iterations, on a truncated answer. A silent failure
   here looks like success: the turn answers with an internal variable, and that
   reads as a finished answer.
+- **One resolver per reference, and the addressee picks the form.** A variable
+  holds what the host would show the MODEL — a large result arrives as a preview
+  with a `[mem:id]` handle. A tool argument, a loop's collection and a condition
+  need the whole thing with the note stripped. Every consumer used to sort that
+  out for itself and one always forgot: the class fired four times in a day at
+  an embedder, each time somewhere new. Now there are two ways to ask —
+  `expand` for the model, `payload` for data — and a guard test fails the build
+  if anything reads the variable map directly.
 - **A mechanism added to the model's path must appear on the `call` path too.**
   Nine misses in a row, each found by a live failure: empty arguments, `{from:}`
   references, delivery, retries, request normalisation, provenance, argv

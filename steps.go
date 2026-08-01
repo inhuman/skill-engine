@@ -429,7 +429,15 @@ func (s *state) forEachStep(ctx context.Context, step Step) (bool, error) {
 			continue
 		}
 		if fe.Collect != "" {
-			collected = append(collected, s.vars[fe.Collect])
+			// Through the resolver, like every other consumer that is not the
+			// model. Taken raw, an iteration whose last step was a `call` with a
+			// large result would contribute a preview plus its "[mem:id]" note —
+			// and once the iterations are joined those notes sit in the MIDDLE
+			// of the string, where trimHostNote can no longer reach them (it
+			// cuts the last line) and a single handle can no longer stand for N
+			// results. Resolving before the join is the only moment this is
+			// still fixable.
+			collected = append(collected, s.payload(fe.Collect))
 		}
 	}
 	if fe.Collect != "" {
