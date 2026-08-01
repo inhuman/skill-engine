@@ -31,11 +31,25 @@ import (
 //	an asset's `lang: python`  →  `params:` / `  lang: python`
 //	skill_engine_version       →  the current major's baseline (added if absent)
 //
+// The input is a skill file as the FORMAT defines it: one YAML document. An
+// embedder that wraps skills in something of its own — front matter, a markdown
+// body, a bundle of several documents — unwraps them before calling and wraps
+// the result back. Such an input is refused rather than guessed at: the wrapper
+// belongs to the embedder, and teaching the library about it would be exactly
+// the host-specific knowledge this package is built without.
+//
 // It does NOT validate the result — parse and validate it as usual afterwards.
 // A skill already on the current major is returned untouched with false.
 func Migrate(raw []byte) ([]byte, bool, error) {
 	lines := strings.Split(string(raw), "\n")
 	scan := scanYAML(lines)
+
+	// Checked before anything else, including the "already current" shortcut:
+	// the embedder must learn on the first call, not on the first file that
+	// happens to need an edit.
+	if err := checkSingleDocument(scan); err != nil {
+		return nil, false, err
+	}
 
 	declared, at := declaredVersion(scan)
 	if declared == "" {
@@ -104,6 +118,39 @@ func migrateAssetLang(lines []string, scan []yamlLine) ([]string, []yamlLine, er
 		out = append(out, indent+"params:", indent+"  lang: "+scan[i].rest)
 	}
 	return out, scanYAML(out), nil
+}
+
+// checkSingleDocument refuses an input that is not one YAML document.
+//
+// The failure this prevents looked like success. Given a file wrapped in front
+// matter (`---`, a header, `---`, a markdown body) the migration used to insert
+// the version field ahead of the opening marker: the header stopped being a
+// header, the skill lost its name, and the caller got changed=true and no
+// error. A refusal costs one message; that result costs a skill that loads as
+// nameless in production.
+//
+// Told apart textually, because a document separator is a line and not a value:
+// a `---` inside `content: |` is part of a script and is skipped along with the
+// rest of the block scalar. An explicit start of a single document is legal and
+// stays legal — what is refused is a SECOND marker, or a first one arriving
+// after content has already begun (an implicit first document).
+func checkSingleDocument(scan []yamlLine) error {
+	markers, content := 0, false
+	for i, l := range scan {
+		switch {
+		case l.inBlock || l.blank || l.comment:
+		case l.docMarker:
+			markers++
+			if markers > 1 || content {
+				return fmt.Errorf(
+					"line %d: input is not a single YAML document — Migrate takes a skill file as the format defines it; strip your own wrapper (front matter, a markdown body, a multi-document bundle) first",
+					i+1)
+			}
+		default:
+			content = true
+		}
+	}
+	return nil
 }
 
 // assetBlock — one asset declaration and the lines of its direct fields.
@@ -184,7 +231,13 @@ func setDeclaredVersion(lines []string, scan []yamlLine, at int, version string)
 	}
 	insertAt := 0
 	for i, l := range scan {
-		if l.blank || l.comment || l.inBlock {
+		switch {
+		case l.docMarker:
+			// A legal explicit document start. The field must land AFTER it —
+			// ahead of it, it would become a document of its own.
+			insertAt = i + 1
+			continue
+		case l.blank, l.comment, l.inBlock:
 			continue
 		}
 		insertAt = i // the first real line: the header comments stay on top
@@ -198,12 +251,13 @@ func setDeclaredVersion(lines []string, scan []yamlLine, at int, version string)
 
 // yamlLine — as much of a line's shape as a textual migration needs.
 type yamlLine struct {
-	indent  int
-	key     string // a plain mapping key, "" when the line is not one
-	rest    string // whatever follows "key:"
-	blank   bool
-	comment bool
-	inBlock bool // content of a block scalar, to be left alone
+	indent    int
+	key       string // a plain mapping key, "" when the line is not one
+	rest      string // whatever follows "key:"
+	blank     bool
+	comment   bool
+	inBlock   bool // content of a block scalar, to be left alone
+	docMarker bool // `---` or `...` at column 0: a document boundary
 }
 
 // scanYAML walks the lines, tracking block scalars.
@@ -231,6 +285,8 @@ func scanYAML(lines []string) []yamlLine {
 		case l.blank:
 		case strings.HasPrefix(trimmed, "#"):
 			l.comment = true
+		case l.indent == 0 && isDocMarker(trimmed):
+			l.docMarker = true
 		case strings.HasPrefix(trimmed, "- "):
 			// A sequence item; none of the keys this migration touches is one.
 		default:
@@ -244,6 +300,17 @@ func scanYAML(lines []string) []yamlLine {
 		out[i] = l
 	}
 	return out
+}
+
+// isDocMarker recognises a document boundary: `---` starts one, `...` ends one,
+// either alone on the line or followed by content on the same line.
+func isDocMarker(trimmed string) bool {
+	for _, m := range []string{"---", "..."} {
+		if trimmed == m || strings.HasPrefix(trimmed, m+" ") {
+			return true
+		}
+	}
+	return false
 }
 
 func isPlainKey(s string) bool {

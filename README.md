@@ -175,7 +175,11 @@ out, changed, err := skillengine.Migrate(raw)
 
 `Migrate` edits the file as text — comments, key order and block scalars
 survive — and does not validate the result; parse and validate it as usual
-afterwards. Format changes and what each migration does are in `CHANGELOG.md`.
+afterwards. It takes a skill file as the format defines it, one YAML document:
+if you keep skills inside a wrapper of your own (front matter, a markdown body),
+strip it before the call and put it back after — a wrapped input is refused,
+not guessed at. Format changes and what each migration does are in
+`CHANGELOG.md`.
 
 ## Invariants paid for with live failures
 
