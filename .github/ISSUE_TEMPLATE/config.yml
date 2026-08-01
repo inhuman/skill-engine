@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Read the README first
+    url: https://github.com/inhuman/skill-engine/blob/main/README.md
+    about: The step kinds, the variables, the contract with the embedding application and the format's pitfalls live here.
+  - name: Format changes and migration
+    url: https://github.com/inhuman/skill-engine/blob/main/CHANGELOG.md
+    about: What each format major broke and what Migrate does about it. Read this before reporting that a skill stopped loading.
+  - name: The format itself
+    url: https://github.com/inhuman/skill-engine/blob/main/skill.schema.yaml
+    about: The full schema, with the reasoning for every field. Also embedded as SchemaYAML (SchemaRU for the Russian translation).
