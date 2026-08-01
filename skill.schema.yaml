@@ -1,0 +1,952 @@
+# The full schema of a skill file
+#
+# A skill is a PLAIN YAML file `<name>.yaml`.
+#   - validated by THIS schema in the editor and in CI, before execution;
+#   - field autocompletion from the schema in an IDE;
+#
+# A skill's turn is described by the `workflow` field — a sequence of steps. The
+# `playbook` field (multi-line text) is a free-form instruction to the executor:
+# it fits where steps would be overkill.
+#
+# A Russian translation of this file is kept alongside as `skill.schema.ru.yaml`;
+# only this one is embedded into the engine and is the source of truth. The two
+# are kept structurally identical by a test.
+#
+# $schema: JSON Schema draft 2020-12, written in YAML.
+
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Skill
+type: object
+# Required are only the fields without which a skill cannot be selected and run.
+# `trigger_examples`, `servers` and `role` are optional.
+required: [skill_engine_version, name, description]
+additionalProperties: false
+
+properties:
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Versions: of the format and of the skill itself. Different things, both needed.
+  # ─────────────────────────────────────────────────────────────────────
+
+  skill_engine_version:
+    type: string
+    pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    examples: ["2.0.0"]
+    description: |
+      The FORMAT version this skill was written for — in effect "what minimum
+      engine do I need". The engine reads the field and knows how to interpret
+      the file.
+
+      What the parts mean:
+        major — an incompatible format change: a skill of a previous major does
+                not load without migration (a field changed meaning, a construct
+                disappeared);
+        minor — an optional field was added. A skill that uses it requires an
+                engine NO OLDER than that minor version — that is the point of a
+                minor: it expresses the required minimum rather than merely
+                "something was added";
+        patch — engine fixes, the format did not change.
+
+      Why. User skills live in file storage and are NOT updated with a deploy:
+      change the meaning of a field and we silently change the behaviour of
+      other people's skills, written under the old rules. A live risk:
+      `tools: []` today means "hand out no tools", and that is a CENTRAL
+      construct of the format; let an empty list start meaning "the flow's set"
+      tomorrow and old skills gain access their author deliberately withheld —
+      and nobody notices.
+
+      An engine either knows how to read several majors or refuses explicitly,
+      but it has no right to silently run under the old rules. This engine
+      REFUSES: a foreign major is an error in both directions, because a
+      description of a previous major would parse without a single complaint,
+      silently losing fields that no longer exist in the structs.
+
+      Absent (legacy skills) → read as 1.0.0.
+
+  skill_version:
+    type: string
+    pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    examples: ["1.0.0", "2.3.1"]
+    description: |
+      The version of THE SKILL ITSELF (semver). It moves on every significant
+      edit, and the number shows WHAT kind of edit it was:
+
+        major — the skill's paradigm changed, backward compatibility is broken:
+                the skill does something fundamentally different, or does it
+                differently (whatever that means for a particular skill);
+        minor — new turns/nodes added, old ones refactored: the set of steps
+                changed;
+        patch — small edits, prompt tuning: the set of steps is the same.
+
+      The distinction is NOT cosmetic — it is needed when reading measurements:
+      moving a step onto `call:` (a new node, minor) changes the COST of a turn,
+      while an edit to a wording (patch) only changes branching accuracy.
+      Without the distinction both groups look the same: "the skill changed".
+
+      Why. A skill may be edited often, and a measurement is taken after every
+      edit. If only the skill's NAME goes into the events, a week later there is
+      no telling which version produced which numbers: comparing "it was 10
+      calls, now it is 3" without a version compares something unknown with
+      something unknown.
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Identity and routing: when this skill gets selected at all
+  # ─────────────────────────────────────────────────────────────────────
+
+  name:
+    type: string
+    pattern: "^[a-z0-9][a-z0-9_-]{0,48}[a-z0-9]$|^[a-z0-9]$"
+    maxLength: 50
+    description: |
+      The skill's name = the file's name.
+
+      The regexp is taken FROM THE CODE (`ValidateSkillName`): it allows an
+      underscore.
+
+  description:
+    type: string
+    description: |
+      What the skill is FOR. It goes into the matcher's embedding — whether the
+      skill gets selected depends on how precise this text is. It is worth
+      writing what the skill is NOT for as well ("NOT for searching the wiki") —
+      negations remove confusion between neighbouring skills.
+
+  trigger_examples:
+    type: array
+    items: {type: string}
+    description: |
+      Live phrasings the skill must fire on. The matcher measures closeness to
+      THEM, not only to the description.
+
+  servers:
+    type: array
+    items: {type: string}
+    description: |
+      The MCP servers available to the skill. This is the CEILING of the radius:
+      `workflow.tools` and a step's `tools` can only narrow it.
+
+  builtin_tools:
+    type: array
+    items: {type: string}
+    description: |
+      Built-in tools needed by the skill's EXECUTOR: run_script, script_list,
+      render_diagram and other tools of the application itself (not of MCP
+      servers).
+
+      Needed because a worker only gets `memory` — the other built-in tools
+      belong to the orchestrator. A playbook telling a worker to call
+      `run_script` without this declaration fires into the void: the runtime
+      answers "no such tool", and the model repeats the same call until the
+      budget runs out. A linter catches the divergence with rule E5.
+
+  role:
+    type: string
+    description: |
+      The name of an execution profile. The value is defined by the
+      APPLICATION: behind the name it keeps call budgets, wall-clock limits,
+      temperature, reasoning effort.
+
+      The schema does not close the list — everyone has their own profiles.
+      Example names, and what may stand behind them, are in examples/.
+
+  kind:
+    type: string
+    description: |
+      The skill's kind — a label for the application: it decides from this how
+      to present and execute the skill. The schema does not restrict the value;
+      an example of splitting into standalone and composite skills is in
+      examples/.
+
+  temperature:
+    type: number
+    minimum: 0
+    maximum: 1
+    description: |
+      A temperature override for the whole skill. A rare field. The range [0,1]
+      matches the code.
+
+      NOTE: on the PROGRAM path this field has no effect — a step's model is
+      built with Temperature 0. Generation parameters are set on the STEP
+      (`sampling:`), because steps do different work: a classifier needs zero,
+      wording an answer needs it warmer.
+
+  disabled:
+    type: boolean
+    default: false
+    description: "Turn the skill off without deleting the file."
+
+  # ─────────────────────────────────────────────────────────────────────
+  # The program: how the skill executes, step by step
+  # ─────────────────────────────────────────────────────────────────────
+
+  mode:
+    enum: [workflow, playbook]
+    description: |
+      Which of the two descriptions to run when both are set: workflow or playbook.
+
+      The field is optional: without it the default applies — "there is a
+      `workflow` → we follow it".
+
+      The full table (the same one implemented by `ResolveMode` in the engine):
+
+        mode        workflow  playbook  →  what runs
+        ─────────── ───────── ───────── ─── ────────────────────────────────
+        unset       present   present   →  workflow (structure outranks prose)
+        unset       present   —         →  workflow
+        unset       —         present   →  playbook
+        unset       —         —         →  ERROR: the skill describes no turn
+        workflow    present   any       →  workflow
+        workflow    —         present   →  ERROR: mode workflow, no steps
+        playbook    any       present   →  playbook
+        playbook    present   —         →  ERROR: mode playbook, no text
+
+      Why the field exists at all. Moving a prompt into steps does not happen in
+      one leap: it is convenient to keep both descriptions and switch between
+      them, comparing outcomes on live requests. Without an explicit switch such
+      a comparison means deleting half the work — with nowhere to get it back
+      from.
+
+      Why an empty half is an ERROR rather than a fallback to the other one. A
+      silent fallback looks like success here: switch the mode to `playbook`,
+      forget to write the text, and the author gets a clean run over the old
+      steps and concludes "in playbook mode it works the same" — from a turn the
+      playbook never took part in. The error costs one edit, the false
+      conclusion costs a whole debugging cycle.
+
+      The field appeared in format 2.0.0. An engine that does not know it will
+      silently follow `workflow` — that is, right past what the author switched;
+      the declared `skill_engine_version` is what protects against that.
+
+  workflow:
+    $ref: "#/$defs/Workflow"
+    description: |
+      The turn described in steps.
+
+      What runs when both steps and a `playbook` are set is decided by `mode`
+      (steps by default).
+
+  playbook:
+    type: string
+    description: |
+      A free-form instruction to the executor: what to do and what to look at.
+      A full way to describe a skill rather than a draft: a skill that has only
+      this field runs as an ordinary prompt — the engine takes no part in such a
+      turn, the embedding application runs it.
+
+      As a rule a new skill is easier to write here first and debug, and only
+      then move into `workflow` for the sake of clarity and the cost of a turn.
+      While the move is under way both descriptions may be kept — which of them
+      is in effect is set by `mode`.
+
+  meta:
+    type: object
+    description: |
+      Arbitrary data for the application: a run schedule, an owner, tags,
+      anything else. The engine does not look in here and does not check the
+      shape — the field exists so that every embedder does not have to reinvent
+      such things. Sample contents are in examples/.
+
+# An explicit mode must have a description under it. These two rules catch in
+# the editor and in CI exactly what people otherwise trip over at run time: the
+# mode was switched and the other half was never written (see `mode`).
+#
+# `required: [mode]` inside `if` is essential: without it a skill WITHOUT a
+# `mode` field satisfies the condition vacuously and inherits someone else's
+# requirement.
+allOf:
+  - if:
+      required: [mode]
+      properties: {mode: {const: workflow}}
+    then:
+      required: [workflow]
+  - if:
+      required: [mode]
+      properties: {mode: {const: playbook}}
+    then:
+      required: [playbook]
+
+$defs:
+
+  # ─────────────────────────────────────────────────────────────────────
+  Fetch:
+    type: object
+    additionalProperties: false
+    description: |
+      How to retrieve an external asset. Network on the hot path of a turn is a
+      real risk, but it is treated with a policy rather than a ban: without
+      freshness an external asset loses its point.
+
+    properties:
+      ttl:
+        type: string
+        default: "0s"
+        description: |
+          How long the content counts as fresh. `0s` — fetch every time (the
+          default: an external asset is external for a reason). `10m`, `1h`,
+          `24h` — an acceptable cache age; sensible for code from a repository,
+          where edits are rare.
+      timeout:
+        type: string
+        default: "5s"
+        description: |
+          The ceiling on ONE attempt. A hard one: a turn must not hang on
+          someone else's downtime.
+      retries:
+        type: integer
+        default: 2
+        minimum: 0
+        maximum: 5
+        description: |
+          How many RETRIES beyond the first attempt, with exponential backoff.
+          Only transient failures are retried: retrying a 404 or a 403 will not
+          change the outcome and will eat the turn's budget.
+      on_unavailable:
+        enum: [fail, stale, empty]
+        default: fail
+        description: |
+          What to do when retrieval failed after all the attempts:
+            fail  — the asset is unavailable, the step gets a failure and
+                    decides by its `on_error`;
+            stale — hand out the last successful copy IF there is one (fail
+                    otherwise);
+            empty — hand out nothing, the step deals with it itself.
+
+          `stale` is the only mode where a turn continues on outdated data, so
+          the degradation must be LOUD: a metric and a log entry with the copy's
+          age. A yesterday's news page substituted silently is the worst
+          possible outcome: the answer looks normal and never gets checked.
+
+  # ─────────────────────────────────────────────────────────────────────
+  Workflow:
+    type: object
+    required: [steps]
+    additionalProperties: false
+    properties:
+      steps:
+        type: array
+        minItems: 1
+        items: {$ref: "#/$defs/Step"}
+        description: "The steps, executed in order."
+      assets:
+        type: object
+        additionalProperties: {$ref: "#/$defs/Asset"}
+        description: |
+          Named payloads a skill hands to a tool without passing them through
+          the model's context.
+
+          Why at all: a model cannot reproduce a multi-kilobyte literal
+          precisely through a tool argument — it REGENERATES and corrupts it.
+          An asset solves that structurally: the content is resolved host-side.
+
+      tools:
+        type: array
+        items: {type: string}
+        description: |
+          The flow's access radius. The default is the skill's `servers`. It is
+          set in order to NARROW: a flow may keep one of the two servers the
+          skill declared.
+      vars:
+        type: object
+        additionalProperties: {type: string}
+        description: "Initial values of the variables."
+
+  # ─────────────────────────────────────────────────────────────────────
+  Step:
+    type: object
+    allOf:
+      - $ref: "#/$defs/StepDependencies"
+    description: |
+      A step carries EXACTLY ONE action: instruction | call | set | switch | if.
+      Checked before execution.
+
+      Variables available at all times:
+        {{input}}   — the user's message
+        {{history}} — previous turns of the conversation (2 exchanges)
+      An unknown variable expands to an empty string rather than to the marker's
+      text: a `{{foo}}` that reached the model reads as part of the instruction.
+    properties:
+      name:
+        type: string
+        description: "The step's name — for logs, events and diagnostics. Optional."
+
+      # --- action 1: the model does the work --------------------------------
+      instruction:
+        type: string
+        description: |
+          What to do. Executed by a narrow agent with EXACTLY the tools listed
+          in the step's `tools`.
+      tools:
+        type: array
+        items: {type: string}
+        description: |
+          The tools of THIS step. Unset → the flow's set.
+          An EMPTY LIST → no tools are handed out at all, and this is the
+          format's main construct: the prohibition "do not go to that source"
+          becomes impossible to violate instead of being requested.
+          The flow's set cannot be widened — only narrowed.
+      max_calls:
+        type: integer
+        minimum: 0
+        description: |
+          The ceiling on tool calls in the step. A field of the STEP, because in
+          live skills the limits differ: a code search — one attempt, walking a
+          tree — up to eight.
+
+          0 is NOT "unlimited": the executor's ceiling is substituted. An
+          unlimited step is deliberately absent from the format.
+      one_of:
+        type: array
+        items: {type: string}
+        description: |
+          The allowed values of the result. A classifier step exists for the
+          sake of branching, and a switch compares EXACTLY.
+          Implemented in two layers:
+            1) a decoding grammar (enum), where the step's model holds one — a
+               value outside the list is IMPOSSIBLE;
+            2) normalisation in code — a fallback; it takes the last occurrence
+               and BREAKS on "this is definitely common, not foreign" (it would
+               give foreign).
+      model:
+        type: string
+        description: |
+          The step's model. Two motives: a classifier does not need a large
+          model (cost), and a grammar only works where the path to the model
+          carries it.
+      response_schema:
+        type: object
+        description: |
+          The schema of the step's structured answer. The result is stored in
+          the variable as an object, fields reachable as `{{var.field}}` — ONE
+          level of nesting.
+
+          Why: `01-fetch-logs` extracts the cluster, the namespace and the pod in
+          ONE step instead of three, i.e. −2 generations per turn in a skill
+          that has only 3–4 of them.
+
+          Meaningful only where a decoding grammar works: on some paths the
+          schema is dropped SILENTLY, and a "structured answer" degenerates into
+          "the model usually answers JSON" — an undetectable hole. That is why
+          `model:` is MANDATORY alongside (`dependentRequired` below): steps run
+          on a subagent's model, where the schema is not applied, and the default
+          would silently break parsing.
+
+          The engine enforces the pair as well (`Flow.Validate`), not only this
+          schema: a schema is only enforced by an embedder who runs a validator,
+          and this rule is too expensive to leave to that. A skill that breaks
+          it is refused before the first generation.
+
+      sampling:
+        $ref: "#/$defs/Sampling"
+
+      # --- action 2: code does the work -----------------------------------
+      call:
+        $ref: "#/$defs/Call"
+
+      # --- action 3: computation ------------------------------------------
+      set:
+        $ref: "#/$defs/Set"
+
+      # --- actions 4-5: branching ------------------------------------------
+      switch:
+        $ref: "#/$defs/Switch"
+      if:
+        $ref: "#/$defs/If"
+
+      # --- action 6: leaving the skill ---------------------------------------
+      exit:
+        $ref: "#/$defs/Exit"
+
+      # --- action 7: hand the work to another skill -------------------------
+      delegate:
+        $ref: "#/$defs/Delegate"
+
+      # --- action 8: repeat steps over a collection ----------------------------
+      for_each:
+        $ref: "#/$defs/ForEach"
+
+      # --- action 9: several branches at once --------------------------
+      parallel:
+        $ref: "#/$defs/Parallel"
+
+      # --- common -------------------------------------------------------------
+      on_server:
+        type: string
+        description: |
+          WHICH server the step runs on. Supports `{{var}}` — the name is
+          computed at execution time.
+
+          For `call:` — the address of the call; for `instruction:` — whose
+          tools the step is handed.
+
+          Why: some skills carry VARIANTS of one server (repo-dev/prod, many
+          k8s clusters, prometheus dev/prod). Without a runtime choice each of
+          them needs a `switch` of 2–5 nearly identical branches. Stronger than
+          substitution inside `call.tool`, because it also narrows the radius of
+          a MODEL step: today `list-pods` hands it the tools of all five clusters
+          at once.
+
+          Permissions are not weakened: `allowServer` checks the SUBSTITUTED
+          name, and it must belong to the flow's set.
+
+      when:
+        type: string
+        description: |
+          The step's applicability condition (same syntax as `if.cond`).
+          False → the step is skipped, the flow moves on.
+
+          Why separate from `if:`: it is expressible with branching too, but
+          `when:` reads as a PROPERTY of the step rather than as a fork in the
+          flow, and does not grow nesting where there is no branch — only "do it
+          or not".
+
+          For instance, a task matches the skill only partially. `when:` makes
+          the skip VISIBLE in the events — otherwise the turn "sometimes gives
+          the right answer, sometimes not", with no visible reason.
+      save_as:
+        type: string
+        description: "The variable for the result. Empty — the result is not stored."
+      on_error:
+        enum: [abort, continue, skip]
+        default: abort
+        description: |
+          The reaction to a step's failure.
+            abort    — stop the flow (default);
+            continue — record the failure into a variable and move on;
+            skip     — skip the rest of the CURRENT branch.
+          A permission refusal is marked DENIED:, any other breakage ERROR:; the
+          policy tells them apart, an `is empty` branch does not.
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Pairings checked by the schema (the error is visible in the editor, not in
+  # production). StepDependencies is applied to Step through the allOf above.
+  StepDependencies:
+    dependentRequired:
+      # A decoding grammar does not survive every path to the model, and it
+      # fails SILENTLY, while steps run on a subagent's model. A schema without
+      # a model choice = a silent hole.
+      response_schema: [model]
+
+  # ─────────────────────────────────────────────────────────────────────
+  Call:
+    type: object
+    required: [tool]
+    additionalProperties: false
+    description: |
+      A tool call WITHOUT the model. No instruction, no choice, no retelling —
+      the result lands in the variable verbatim.
+
+      This is where the format's main win is: a model step costs TWO generations
+      (decide to call + retell), and both are redundant when the arguments are
+      known in advance. Measured: 6 → 3 generations per turn.
+
+      Permissions are NOT bypassed: the call goes through the same BeforeCall
+      chain as a call from the model (policy/RBAC, pattern detector, session
+      budget, events, OTel), and it cannot name a server outside the flow's set.
+    properties:
+      tool:
+        type: string
+        pattern: "^[^:]+(:.+)?$"
+        description: "The tool, in the form \"server:tool\"."
+      args:
+        type: object
+        description: |
+          The arguments. {{var}} is substituted into STRING values, nested ones
+          included; numbers, flags and the object's shape stay as written.
+      save_as: {type: string}
+      on_error:
+        enum: [abort, continue, skip]
+
+  # ─────────────────────────────────────────────────────────────────────
+  Sampling:
+    type: object
+    additionalProperties: false
+    description: |
+      The generation parameters of THIS step.
+
+      The unit of tuning is a step, not a skill, for the same reason `tools` and
+      `max_calls` belong to a step: steps do different work. A classifier needs
+      zero temperature and tight sampling — it picks between two values; the
+      final wording of an answer needs it warmer, or the text comes out wooden.
+      One parameter for the whole skill serves both badly.
+
+      What is set here overrides the engine's defaults; what is not set comes
+      from the model's profile. The set has been checked against reality — it is
+      exactly what reaches inference, with no invented knobs.
+    properties:
+      temperature:
+        type: number
+        minimum: 0
+        maximum: 2
+        description: |
+          0 — deterministic (classifiers, field extraction, templated calls);
+          higher — freer (wording an answer for a human).
+      top_p:
+        type: number
+        minimum: 0
+        maximum: 1
+        description: "Nucleus sampling. 0 → the parameter is not passed."
+      top_k:
+        type: integer
+        minimum: 0
+        description: "A cut-off by number of candidates. 0 → not passed."
+      min_p:
+        type: number
+        minimum: 0
+        maximum: 1
+        description: "A candidate's probability threshold. 0 → not passed."
+      max_tokens:
+        type: integer
+        minimum: 1
+        description: |
+          The output-token ceiling of THIS step; unset — the global
+          MaxOutputTokens applies. Needed where a step is short by nature while
+          a runaway generation is expensive. It cannot be raised above the
+          model's window — the clamp happens after the override.
+      repetition_penalty:
+        type: number
+        minimum: 0
+        description: |
+          A penalty for repetition. Useful for steps prone to looping on long
+          enumerations.
+
+          CAREFUL WITH `response_schema`: in a structured answer repetition IS
+          the structure — quotes, colons, the same field names in every element
+          of a list. The penalty presses on exactly those and pushes the model
+          away from continuing the list.
+
+          Measured on an answer made of two lists of objects: without a penalty
+          and at 1.05 — five elements in each; at 1.15 — it hit the ceiling and
+          did not parse; at 1.30 — THE LISTS ARE EMPTY. The last is the most
+          dangerous: an empty list looks like "nothing to report" rather than
+          like a failure.
+
+      reasoning:
+        type: string
+        description: |
+          Reasoning depth — on models that support it. The scale is set by the
+          model's vendor, so the schema does not restrict the value. The level
+          is set on the STEP that needs it, not on the whole skill.
+
+  # ─────────────────────────────────────────────────────────────────────
+  Delegate:
+    type: object
+    required: [skill, task]
+    additionalProperties: false
+    description: |
+      Hand the work to another skill. This is what composite skills
+      (`kind: composite`) are made of.
+
+      Without this action a composite skill handed a `workflow` would execute as
+      an ordinary flow and LOSE the spawn tools entirely — that is, stop doing
+      its job.
+
+      A delegate's radius is the radius of the CALLED skill, not of the caller:
+      a skill declares its own servers, and delegation does not widen the
+      caller's access (the same principle as `spawn_subagent` has today).
+    properties:
+      skill:
+        type: string
+        description: "The name of the skill the work is handed to."
+      task:
+        type: string
+        description: "The task in words; supports {{var}}."
+      save_as: {type: string}
+      on_error:
+        enum: [abort, continue, skip]
+
+  # ─────────────────────────────────────────────────────────────────────
+  ForEach:
+    type: object
+    required: [in, as, steps]
+    additionalProperties: false
+    description: |
+      Repeat steps for every item of a collection.
+
+    properties:
+      in:
+        type: string
+        description: |
+          The variable holding the collection. An array (say, from a
+          `response_schema`) is iterated element-wise; a string, by its
+          non-empty lines. The latter covers the observed case of "a list of
+          services produced by a tool".
+      as:
+        type: string
+        description: "The name of the item variable inside the loop body."
+      steps:
+        type: array
+        minItems: 1
+        items: {$ref: "#/$defs/Step"}
+      collect:
+        type: string
+        description: |
+          The variable the iterations' results are gathered into (strings
+          separated by a line break). Unset — the results stay inside the
+          iteration only.
+      max_iterations:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 10
+        description: |
+          The iteration ceiling. REQUIRED in spirit even when not set
+          explicitly: a loop over a collection of unknown length is a straight
+          road to a runaway, and the session budget will stop it only after the
+          turn has been burned. A list longer than the ceiling is processed
+          partially, and that is SAID in the result rather than swallowed.
+      on_error:
+        enum: [abort, continue, skip]
+        default: abort
+        description: |
+          What to do when an iteration failed. `continue` — mark it and move on:
+          one item out of five not being found is no reason to lose the other
+          four.
+
+  # ─────────────────────────────────────────────────────────────────────
+  Parallel:
+    type: object
+    required: [branches]
+    additionalProperties: false
+    description: |
+      Several independent branches at once.
+
+      Branches DO NOT SEE each other's variables — only those that existed
+      before the fork. Otherwise the result would depend on the order of
+      completion, which is non-deterministic; the format exists for the
+      opposite.
+    properties:
+      branches:
+        type: array
+        minItems: 2
+        items:
+          type: array
+          items: {$ref: "#/$defs/Step"}
+      collect:
+        type: string
+        description: "The variable the branches' results are merged into, in declaration order."
+      on_error:
+        enum: [abort, continue, skip]
+        description: |
+          The behaviour when ONE branch fails. `continue` is the most common:
+          gather what worked out and say what is missing.
+
+  # ─────────────────────────────────────────────────────────────────────
+  Exit:
+    type: object
+    additionalProperties: false
+    description: |
+      Stop the program and return the turn to the application's ORDINARY path:
+      the skill was matched by mistake, and continuing through its steps means
+      confidently producing a wrong answer.
+
+      The application learns about the exit from an event — routing misses stay
+      labelled.
+    properties:
+      reason:
+        type: string
+        description: "Why we left — into the event and the log. Read when diagnosing routing misses."
+
+  # ─────────────────────────────────────────────────────────────────────
+  Set:
+    type: object
+    required: [var, value]
+    additionalProperties: false
+    description: |
+      An assignment without involving the model. This is how rules that a model
+      would otherwise apply are expressed:
+      "some-doc → docs/resources/some_doc.md".
+    properties:
+      var: {type: string}
+      value:
+        type: string
+        description: "Supports {{var}}."
+
+  # ─────────────────────────────────────────────────────────────────────
+  Switch:
+    type: object
+    required: [var, cases]
+    additionalProperties: false
+    description: "Branching on a variable's value."
+    properties:
+      var: {type: string}
+      cases:
+        type: object
+        additionalProperties:
+          type: array
+          items: {$ref: "#/$defs/Step"}
+      default:
+        type: array
+        items: {$ref: "#/$defs/Step"}
+
+  # ─────────────────────────────────────────────────────────────────────
+  If:
+    type: object
+    required: [cond, then]
+    additionalProperties: false
+    description: "Branching on a condition."
+    properties:
+      cond:
+        type: string
+        description: |
+          The forms of a condition:
+            var == value
+            var != value
+            var is empty        — empty OR a marked failure (ERROR:/DENIED:)
+            var is not empty
+          `is empty` exists because to a "nothing found, try another way" branch
+          emptiness and a failure mean the same thing, even though to the policy
+          they do not.
+      then:
+        type: array
+        items: {$ref: "#/$defs/Step"}
+      else:
+        type: array
+        items: {$ref: "#/$defs/Step"}
+
+  # ─────────────────────────────────────────────────────────────────────
+  Asset:
+    type: object
+    additionalProperties: false
+    description: |
+      A named payload passed to a tool by reference.
+
+      Described along TWO INDEPENDENT axes — deliberately not collapsed into one
+      enum, which would give combinatorics (code_inline, code_repo,
+      config_url…):
+
+        kind   — WHAT it is: code | text | config | data
+        source — WHERE it comes from: inline | repo | user_file | url
+
+      Every pair makes sense: a config can be both inline and from a repository;
+      code can be both right here in the skill and pulled in. Splitting the axes
+      is also the answer to "what if a new source appears tomorrow": one axis
+      gains a value rather than the format gaining N new types.
+
+      TWO WAYS TO USE ONE, and `kind` hints at the fitting one:
+
+        {from: "asset:name"}  in an argument of a `call:` step — the content is
+                              resolved HOST-SIDE and does NOT pass through the
+                              model. This is how `code` and `config` are used:
+                              the model does not rewrite them because it never
+                              sees them.
+
+        {{asset:name}}        in the text of an `instruction:` — the content is
+                              SUBSTITUTED into the prompt. This is how `text`
+                              and `data` are used: a lookup table or a report
+                              template is useless unless the model reads it.
+
+      So `kind` is not decoration: it answers the question "does this payload
+      belong in the model's context or past it". A wrong choice is visible
+      immediately — code in the context starts getting "regenerated", while a
+      reference book passed by reference influences nothing.
+
+      Everything that only makes sense for a specific kind (the language for
+      code, the format for text) lives in `params` — not at the asset's top
+      level: otherwise the schema grows with every kind the application invents.
+    properties:
+
+      kind:
+        type: string
+        description: |
+          WHAT it essentially is. The schema does not restrict the value — every
+          application has its own set; examples ("code", "reference text",
+          "configuration", "data") are in examples/.
+
+          The label is auxiliary: the way it is passed is chosen by the PLACE of
+          use, not by this (see the two reference forms above).
+
+      source:
+        type: string
+        description: |
+          WHERE the content comes from. The source's name is interpreted by the
+          application's resolver — the schema does not close the list (examples
+          are in examples/).
+
+          The format cares about one thing: the content is either HERE
+          (`content`) or AT AN ADDRESS (`ref`). Exactly one of the two —
+          otherwise it is unclear what to execute.
+
+      content:
+        type: string
+        description: "The content. Required with `source: inline`, not given otherwise."
+
+      ref:
+        type: string
+        description: |
+          The address of the content — when it does not live in the skill
+          itself. The form of the address is defined by the application's
+          resolver (examples are in examples/).
+
+      args:
+        type: object
+        description: |
+          The MCP call's arguments for `source: mcp`. They support `{{var}}` in
+          string values — as in a `call:` step.
+
+      params:
+        type: object
+        description: |
+          Parameters that only make sense for a SPECIFIC kind: `lang` for code
+          (giving a linter a reason to check syntax before production), `format`
+          for text, a schema for data.
+
+          An open map rather than a set of fields, because kinds are the
+          application's vocabulary (see `kind`): a field per kind would mean the
+          schema grows with every foreign kind while sitting empty on every
+          other asset. That is exactly how `lang` lived here, needed by one kind
+          out of four.
+
+          The engine does not look in here and does not check the shape — it
+          hands this to the application's resolver as is. Contents by kind are
+          in examples/vocabulary.yaml.
+
+          Which means VALIDATING THE KEYS IS THE RESOLVER'S JOB, and it is not
+          optional. The openness is paid for: `params: {langauge: python}`
+          passes both the parser and this schema, where a misspelled `lang`
+          field could not exist at all. Only the resolver knows which keys are
+          legal for a given kind — and an unread key means the linter never
+          checks the syntax and the failure surfaces in production.
+
+      deliver:
+        type: string
+        description: |
+          The route of the OUTPUT of the tool that consumed the asset: where to
+          put the result instead of returning it into the step's variable. Route
+          names are defined by the application — the schema does not restrict
+          them (examples are in examples/).
+
+          Why declare it here rather than decide as you go: a route the model is
+          supposed to choose gets forgotten exactly when everything else has
+          already worked — and the work is lost on the last step. Declared by
+          the skill's author, it is applied deterministically.
+
+      fetch:
+        $ref: "#/$defs/Fetch"
+        description: |
+          The retrieval policy — applies when the content is taken from an
+          address rather than living in the skill.
+
+      validate_with:
+        type: string
+        description: |
+          For `kind: config` — the name of the schema to validate the content
+          against before execution. Is it needed, or is it enough that the tool
+          will reject a bad config itself? The difference is in the moment: a
+          linter tells the author right away, a tool tells them in production,
+          at a user's.
+
+      description:
+        type: string
+        description: |
+          What this asset is for — read by the HUMAN editing the skill.
+          Especially needed for external assets: `content` is not visible in the
+          file, and without a description it is unclear what will arrive by the
+          reference.
+
+    # The content is either HERE or AT AN ADDRESS — exactly one of the two. That
+    # is the only thing the format knows about an asset for certain; what
+    # sources exist and whether some kind of asset requires additional fields is
+    # decided by the application.
+    oneOf:
+      - required: [content]
+      - required: [ref]

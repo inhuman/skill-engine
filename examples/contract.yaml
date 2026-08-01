@@ -1,0 +1,77 @@
+# Checking a contract: extract its terms and compare them against company rules.
+#
+# Shows `if` and `exit`: a skill handed the wrong document LEAVES the turn
+# instead of confidently analysing whatever it got. It also shows an external
+# asset — the rules live in storage rather than in the skill and are fetched
+# with a policy (`fetch`), because they change without the skill being edited.
+
+skill_engine_version: "2.0.0"
+skill_version: "1.0.0"
+name: contract
+description: Check a contract for compliance with internal rules.
+role: analyzer
+kind: leaf
+
+servers: [storage]
+
+workflow:
+  tools: [storage]
+
+  assets:
+    policy:
+      kind: text
+      source: storage
+      ref: "legal/contract-rules.md"
+      description: the rules for approving contracts
+      fetch:
+        ttl: 1h
+        timeout: 10s
+        retries: 2
+        on_unavailable: fail
+
+  steps:
+    - name: identify
+      instruction: |
+        The document: {{input}}
+
+        kind — contract, if this is a contract; other, if it is something else.
+      tools: []
+      one_of: [contract, other]
+      save_as: doc_kind
+
+    - if:
+        cond: "doc_kind == other"
+        then:
+          # Not our case — an honest exit instead of confidently analysing
+          # whatever turned up.
+          - exit:
+              reason: "the document does not look like a contract"
+
+    - name: extract
+      instruction: |
+        The contract: {{input}}
+
+        Extract: the term, the amount, the payment procedure, the parties'
+        liability. Mark whatever is not in the text as missing; do not guess.
+      tools: []
+      model: vllm/gemma-4-e4b       # a response_schema without a model choice = a silent hole
+      response_schema:
+        type: object
+        properties:
+          term: {type: string}
+          amount: {type: string}
+          payment: {type: string}
+          liability: {type: string}
+        required: [term, amount, payment, liability]
+      save_as: terms
+
+    - name: compare
+      instruction: |
+        The company's rules:
+        {{asset:policy}}
+
+        The contract's terms: {{terms}}
+
+        Name the divergences: the term → which rule it breaks → what it risks.
+        If there are none, say so.
+      tools: []

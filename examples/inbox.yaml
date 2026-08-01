@@ -1,0 +1,73 @@
+# Triaging a support email: classify it and act differently.
+#
+# Shows the format's main property: A GUARD BECOMES A BRANCH. In the "spam"
+# branch the step that writes a reply to the customer is physically NOT THERE —
+# not because the text asked for that, but because it does not exist there.
+
+skill_engine_version: "2.0.0"
+skill_version: "1.0.0"
+name: inbox
+description: Triage an incoming email and either reply or file a task.
+role: executor
+kind: composite
+
+servers: [mail, tracker]
+
+meta:
+  owner: support-team
+  tags: [inbox, triage]
+
+workflow:
+  tools: [mail, tracker]
+
+  steps:
+    - name: classify
+      instruction: |
+        The email: {{input}}
+
+        question — they are asking how to use it;
+        bug — they are reporting a breakage;
+        spam — a mailing list or nonsense.
+      tools: []
+      one_of: [question, bug, spam]
+      save_as: kind
+
+    - switch:
+        var: kind
+        cases:
+          question:
+            - name: reply
+              instruction: |
+                The customer's question: {{input}}
+                Answer briefly and to the point, without "thank you for
+                contacting us".
+              tools: [mail]
+              max_calls: 1
+
+          bug:
+            # The breakage is investigated by a separate skill — this one only
+            # files the task.
+            - name: investigate
+              delegate:
+                skill: diagnose
+                task: "look into the symptom: {{input}}"
+              save_as: findings
+
+            - name: file_task
+              instruction: |
+                The symptom: {{input}}
+                The investigation: {{findings}}
+
+                File a task: a title and a description with facts from the
+                investigation. Add nothing of your own.
+              tools: [tracker]
+              max_calls: 1
+
+        # spam and anything that did not classify: close it quietly, write to
+        # nobody.
+        default:
+          - name: drop
+            instruction: |
+              The email needs no reply. Say in one line that it was closed with
+              no action, and why.
+            tools: []
