@@ -8,27 +8,28 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Ответ хода записывает либо модель (шаг instruction), либо инструмент (шаг
-// call), и вызывающий обязан их различать: черновик модели правомерно переписать
-// «голосом», детерминированный отчёт — нет. скилл печатает свой отчёт
-// вместе со строкой метрик python-скриптом, и пересказ этого текста моделью
-// уничтожил бы ровно те гарантии, ради которых рендер детерминированный.
+// The turn's answer is written either by the model (an instruction step) or by
+// a tool (a call step), and the caller must tell them apart: a model's draft may
+// legitimately be rewritten "in voice", a deterministic report may not. A skill
+// prints its report together with a metrics line from a python script, and
+// having a model retell that text would destroy exactly the guarantees the
+// render is deterministic for.
 func TestOutcomeReportsWhatWroteTheAnswer(t *testing.T) {
-	t.Run("ответила модель", func(t *testing.T) {
+	t.Run("the model answered", func(t *testing.T) {
 		var f Flow
 		require.NoError(t, yaml.Unmarshal([]byte(`
 steps:
   - name: report
-    instruction: ответь
+    instruction: answer
     tools: []
 `), &f))
 		_, out, err := ExecuteWith(t.Context(), &f,
-			Deps{Runner: &fakeRunner{answer: map[string]string{"report": "готово"}}}, nil)
+			Deps{Runner: &fakeRunner{answer: map[string]string{"report": "done"}}}, nil)
 		require.NoError(t, err)
 		assert.Equal(t, "instruction", out.AnsweredBy)
 	})
 
-	t.Run("ответил инструмент", func(t *testing.T) {
+	t.Run("a tool answered", func(t *testing.T) {
 		var f Flow
 		require.NoError(t, yaml.Unmarshal([]byte(`
 tools: [srv]
@@ -39,7 +40,7 @@ steps:
       save_as: answer
 `), &f))
 		_, out, err := ExecuteWith(t.Context(), &f,
-			Deps{Caller: &recordingCaller{out: "## отчёт\n_метрики: published=10_"}}, nil)
+			Deps{Caller: &recordingCaller{out: "## report\n_metrics: published=10_"}}, nil)
 		require.NoError(t, err)
 		assert.Equal(t, "call", out.AnsweredBy)
 	})

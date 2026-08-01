@@ -6,63 +6,77 @@ import (
 	"strings"
 )
 
-// Версии формата и скилла (semver).
+// Format and skill versions (semver).
 //
-// Две РАЗНЫЕ вещи, и путать их дорого:
+// TWO DIFFERENT things, and confusing them is expensive:
 //
-//	EngineVersion       — версия ФОРМАТА, которую понимает этот движок;
-//	Skill.EngineVersion — версия, под которую написан скилл, то есть
-//	                      требуемый им МИНИМУМ движка.
+//	EngineVersion       — the FORMAT version this engine understands;
+//	Skill.EngineVersion — the version a skill was written for, i.e. the
+//	                      minimum engine it requires.
 //
-// Зачем вообще. Скиллы пользователей живут в хранилище файлов и НЕ обновляются с
-// деплоем: сменив семантику поля, мы молча меняем поведение чужих скиллов,
-// написанных по старым правилам. Живой риск — `tools: []`: сегодня это
-// «инструментов не выдавать», центральная конструкция формата; начни пустой
-// список значить «набор потока», и старые скиллы получат доступ, который автор
-// снимал намеренно.
+// Why at all. User skills live in file storage and are NOT updated together
+// with a deploy: change the meaning of a field and we silently change the
+// behaviour of other people's skills, written under the old rules. The live
+// risk is `tools: []` — today it means "hand out no tools", a central
+// construct of the format; let an empty list start meaning "the flow's set"
+// and old skills gain access their author deliberately withheld.
 
-// EngineVersion — версия формата, поддерживаемая этим движком.
+// EngineVersion — the format version supported by this engine.
 //
-//	major — несовместимое изменение (скилл прошлого мажора без миграции не читается);
-//	minor — добавлено необязательное поле (скилл, который им пользуется, требует
-//	        движок не ниже этой минорной);
-//	patch — исправления движка, формат не менялся.
-const EngineVersion = "1.0.0"
+//	major — incompatible change (a skill of a previous major does not load
+//	        without migration);
+//	minor — an optional field was added (a skill using it requires an engine
+//	        no older than that minor);
+//	patch — engine fixes, the format did not change.
+const EngineVersion = "2.0.0"
 
-// LegacyEngineVersion — что считать объявленной версией, когда поле не задано
-// (скиллы, написанные до её введения).
+// LegacyEngineVersion — what counts as the declared version when the field is
+// absent (skills written before it was introduced).
+//
+// From major 2 on, such a skill is rejected rather than executed: it was
+// written under 1.x rules, and parsing it silently would drop fields that no
+// longer exist in the structs.
 const LegacyEngineVersion = "1.0.0"
 
-// CheckEngineVersion сообщает, может ли движок исполнить скилл.
+// CheckEngineVersion reports whether the engine can execute a skill.
 //
-// Отказ ВНЯТНЫЙ, а не молчаливое исполнение по старым правилам: скилл, который
-// требует поля из будущей версии, при тихом фолбэке отработает «как-то» — то
-// есть даст правдоподобный неверный результат вместо честной ошибки. Это тот же
-// класс отказа, на котором обжигались с мост до модели, где выброшенное поле
-// не отвергалось, а исчезало.
+// The refusal is EXPLICIT rather than a silent run under the old rules: a
+// skill that needs fields from a future version would, on a quiet fallback,
+// work "somehow" — that is, produce a plausible wrong result instead of an
+// honest error. Same class of failure as the model bridge where a dropped
+// field vanished instead of being rejected.
 func CheckEngineVersion(declared string) error {
 	if declared == "" {
 		declared = LegacyEngineVersion
 	}
 	want, err := parseVersion(declared)
 	if err != nil {
-		return fmt.Errorf("skill_engine_version %q: не semver", declared)
+		return fmt.Errorf("skill_engine_version %q: not semver", declared)
 	}
 	have, _ := parseVersion(EngineVersion)
+	// A foreign major is refused in BOTH directions, not just "from the
+	// future". A major is a major precisely because older descriptions read by
+	// different rules: a 1.x skill with an asset `lang` field parses under a
+	// 2.x engine without a single complaint — the field simply disappears,
+	// because the struct no longer has it. That silent loss is the very
+	// failure versioning exists to prevent.
+	if want.major != have.major {
+		return fmt.Errorf("skill targets format %s, engine is %s: different major, migration needed", declared, EngineVersion)
+	}
 	if want.compare(have) > 0 {
-		return fmt.Errorf("скилл требует версию формата %s, движок умеет %s", declared, EngineVersion)
+		return fmt.Errorf("skill requires format version %s, engine supports %s", declared, EngineVersion)
 	}
 	return nil
 }
 
-// CompareSkillVersions сравнивает версии ОДНОГО скилла: >0 когда a новее b.
+// CompareSkillVersions compares versions of ONE skill: >0 when a is newer.
 //
-// Нужно там, где сегодня сравнивается хеш содержимого: хеш отвечает на вопрос
-// «изменилось ли», но не на «что новее», поэтому по нему нельзя ни откатиться
-// осознанно, ни разрешить расхождение.
+// Needed where a content hash is compared today: a hash answers "did it
+// change" but not "which is newer", so it supports neither a deliberate
+// rollback nor resolving a divergence.
 //
-// Пустая версия считается самой старой: скилл, её не объявивший, не должен
-// перезаписывать тот, который объявил.
+// An empty version counts as the oldest: a skill that did not declare one must
+// not overwrite a skill that did.
 func CompareSkillVersions(a, b string) (int, error) {
 	va, err := parseSkillVersion(a)
 	if err != nil {
@@ -81,34 +95,35 @@ func parseSkillVersion(v string) (version, error) {
 	}
 	p, err := parseVersion(v)
 	if err != nil {
-		return version{}, fmt.Errorf("skill_version %q: не semver", v)
+		return version{}, fmt.Errorf("skill_version %q: not semver", v)
 	}
 	return p, nil
 }
 
-// version — major.minor.patch. Своя реализация вместо semver-библиотеки: движок
-// встраивают в чужое приложение, и каждая зависимость здесь становится
-// зависимостью встраивающего приложения — с его версиями и его конфликтами. Из semver нужны ровно
-// разбор и сравнение трёх чисел, суффиксы предрелизов формату не нужны.
+// version — major.minor.patch. Hand-rolled instead of a semver library: the
+// engine is embedded into someone else's application, and every dependency
+// here becomes a dependency of that application — with its versions and its
+// conflicts. All the format needs from semver is parsing and comparing three
+// numbers; prerelease suffixes are of no use to it.
 type version struct{ major, minor, patch int }
 
 func parseVersion(s string) (version, error) {
 	parts := strings.SplitN(strings.TrimPrefix(strings.TrimSpace(s), "v"), ".", 4)
 	if len(parts) != 3 {
-		return version{}, fmt.Errorf("нужны три части major.minor.patch")
+		return version{}, fmt.Errorf("want three parts major.minor.patch")
 	}
 	var v version
 	for i, dst := range []*int{&v.major, &v.minor, &v.patch} {
 		n, err := strconv.Atoi(parts[i])
 		if err != nil || n < 0 {
-			return version{}, fmt.Errorf("часть %q не число", parts[i])
+			return version{}, fmt.Errorf("part %q is not a number", parts[i])
 		}
 		*dst = n
 	}
 	return v, nil
 }
 
-// compare: >0 когда получатель новее аргумента.
+// compare: >0 when the receiver is newer than the argument.
 func (v version) compare(o version) int {
 	for _, p := range [][2]int{{v.major, o.major}, {v.minor, o.minor}, {v.patch, o.patch}} {
 		if p[0] != p[1] {

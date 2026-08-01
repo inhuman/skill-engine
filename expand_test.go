@@ -8,32 +8,33 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Доступ к полю структурного результата: шаг извлекает несколько значений
-// ОДНИМ вызовом вместо трёх — иначе смысл структурного ответа теряется.
+// Accessing a field of a structured result: a step extracts several values with
+// ONE call instead of three — otherwise the point of a structured answer is
+// lost.
 func TestExpandStructuredField(t *testing.T) {
 	f := parseFlow(t, `
 steps:
-  - set: {var: msg, value: "кластер {{target.cluster}}, ns {{target.namespace}}"}
+  - set: {var: msg, value: "cluster {{target.cluster}}, ns {{target.namespace}}"}
 `)
 	vars, _, err := ExecuteWith(context.Background(), f, Deps{}, map[string]string{
 		"target": `{"cluster":"staging","namespace":"backend","replicas":3}`,
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "кластер staging, ns backend", vars["msg"])
+	assert.Equal(t, "cluster staging, ns backend", vars["msg"])
 }
 
-// Не-строковое поле подставляется как JSON: число остаётся числом на вид.
+// A non-string field is substituted as JSON: a number still looks like a number.
 func TestExpandStructuredNonStringField(t *testing.T) {
-	f := parseFlow(t, `steps: [{set: {var: out, value: "реплик: {{t.replicas}}"}}]`)
+	f := parseFlow(t, `steps: [{set: {var: out, value: "replicas: {{t.replicas}}"}}]`)
 	vars, _, err := ExecuteWith(context.Background(), f, Deps{}, map[string]string{
 		"t": `{"replicas":3}`,
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "реплик: 3", vars["out"])
+	assert.Equal(t, "replicas: 3", vars["out"])
 }
 
-// Отсутствующее поле — пустая строка, как и отсутствующая переменная: маркер,
-// доехавший до модели, читался бы как часть инструкции.
+// A missing field yields an empty string, same as a missing variable: a marker
+// that reached the model would read as part of the instruction.
 func TestExpandMissingFieldIsEmpty(t *testing.T) {
 	f := parseFlow(t, `steps: [{set: {var: out, value: "[{{t.nope}}][{{missing.field}}]"}}]`)
 	vars, _, err := ExecuteWith(context.Background(), f, Deps{}, map[string]string{"t": `{"a":1}`})
@@ -41,51 +42,52 @@ func TestExpandMissingFieldIsEmpty(t *testing.T) {
 	assert.Equal(t, "[][]", vars["out"])
 }
 
-// Переменная с точкой в ИМЕНИ выигрывает у разбора «объект.поле»: явное имя
-// сильнее догадки.
+// A variable with a dot in its NAME beats parsing "object.field": an explicit
+// name outranks a guess.
 func TestExpandPrefersLiteralName(t *testing.T) {
 	f := parseFlow(t, `steps: [{set: {var: out, value: "{{a.b}}"}}]`)
 	vars, _, err := ExecuteWith(context.Background(), f, Deps{}, map[string]string{
-		"a.b": "буквальное",
-		"a":   `{"b":"из объекта"}`,
+		"a.b": "literal",
+		"a":   `{"b":"from the object"}`,
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "буквальное", vars["out"])
+	assert.Equal(t, "literal", vars["out"])
 }
 
-// Не-JSON в переменной не ломает подстановку.
+// Non-JSON in a variable does not break substitution.
 func TestExpandFieldOfNonJSON(t *testing.T) {
 	f := parseFlow(t, `steps: [{set: {var: out, value: "[{{t.field}}]"}}]`)
-	vars, _, err := ExecuteWith(context.Background(), f, Deps{}, map[string]string{"t": "просто текст"})
+	vars, _, err := ExecuteWith(context.Background(), f, Deps{}, map[string]string{"t": "just text"})
 	require.NoError(t, err)
 	assert.Equal(t, "[]", vars["out"])
 }
 
-// Условие по ПОЛЮ структурного результата.
+// A condition on a FIELD of a structured result.
 //
-// Живой случай: switch научили читать поле, а условие — забыли. Замер
-// показал ДВА вызова вместо трёх и ноль обращений в репозиторий — то есть
-// «стало дешевле» вместо «сломалось»: ветка «ресурс не назван» выбиралась
-// всегда, потому что `req.resource is not empty` молча ложно.
+// Live case: switch was taught to read a field, and the condition was forgotten.
+// The measurement showed TWO calls instead of three and zero trips to the
+// repository — that is, "it got cheaper" instead of "it broke": the "resource
+// not named" branch was always chosen, because `req.resource is not empty` was
+// silently false.
 func TestConditionOnStructuredField(t *testing.T) {
 	f := parseFlow(t, `
 steps:
   - if:
       cond: "req.resource is not empty"
       then:
-        - set: {var: out, value: "есть {{req.resource}}"}
+        - set: {var: out, value: "have {{req.resource}}"}
       else:
-        - set: {var: out, value: "нет"}
+        - set: {var: out, value: "none"}
 `)
 	vars, _, err := ExecuteWith(context.Background(), f, Deps{},
 		map[string]string{"req": `{"resource":"t1_kaas","owner":"t1"}`})
 	require.NoError(t, err)
-	assert.Equal(t, "есть t1_kaas", vars["out"])
+	assert.Equal(t, "have t1_kaas", vars["out"])
 
 	vars, _, err = ExecuteWith(context.Background(), f, Deps{},
 		map[string]string{"req": `{"owner":"t1"}`})
 	require.NoError(t, err)
-	assert.Equal(t, "нет", vars["out"], "поля нет — условие ложно")
+	assert.Equal(t, "none", vars["out"], "no field — the condition is false")
 }
 
 func TestSwitchOnStructuredField(t *testing.T) {
@@ -94,38 +96,38 @@ steps:
   - switch:
       var: req.owner
       cases:
-        t1: [{set: {var: out, value: "наш"}}]
-        foreign: [{set: {var: out, value: "чужой"}}]
+        t1: [{set: {var: out, value: "ours"}}]
+        foreign: [{set: {var: out, value: "theirs"}}]
 `)
 	vars, _, err := ExecuteWith(context.Background(), f, Deps{},
 		map[string]string{"req": `{"owner":"foreign"}`})
 	require.NoError(t, err)
-	assert.Equal(t, "чужой", vars["out"])
+	assert.Equal(t, "theirs", vars["out"])
 }
 
-// Сравнение по полю — та же дорога.
+// Comparing by field takes the same road.
 func TestEqualityOnStructuredField(t *testing.T) {
 	f := parseFlow(t, `
 steps:
   - if:
       cond: "req.genre == write"
-      then: [{set: {var: out, value: "пишем конфиг"}}]
-      else: [{set: {var: out, value: "разбираем"}}]
+      then: [{set: {var: out, value: "writing config"}}]
+      else: [{set: {var: out, value: "analysing"}}]
 `)
 	vars, _, err := ExecuteWith(context.Background(), f, Deps{},
 		map[string]string{"req": `{"genre":"write"}`})
 	require.NoError(t, err)
-	assert.Equal(t, "пишем конфиг", vars["out"])
+	assert.Equal(t, "writing config", vars["out"])
 }
 
-// fakeMemory — рабочая память хода в тестах.
+// fakeMemory — the turn's working memory in tests.
 type fakeMemory map[string]string
 
 func (m fakeMemory) Get(id string) (string, bool) { v, ok := m[id]; return v, ok }
 
-// Хост дописывает хендл к ЛЮБОМУ результату инструмента, и переменная перестаёт
-// быть валидным JSON. Без снятия пометки `{{var.field}}` не работал НИ РАЗУ ни
-// на одном результате `call:` — поле молча пустело.
+// The host appends a handle to ANY tool result, and the variable stops being
+// valid JSON. Without stripping the note, `{{var.field}}` did not work ONCE on
+// any `call:` result — the field silently went empty.
 func TestFieldLookupIgnoresHostMemNote(t *testing.T) {
 	s := &state{vars: map[string]string{
 		"ctx": `{"head_sha":"abc123","delta_scope":"go"}` + "\n[mem:res-1]",
@@ -134,45 +136,56 @@ func TestFieldLookupIgnoresHostMemNote(t *testing.T) {
 	assert.Equal(t, "go", s.lookup("ctx.delta_scope"))
 }
 
-// У обрезанного превью JSON неполон и не разберётся никогда. Целое лежит в
-// рабочей памяти под тем же хендлом — оттуда и берём.
+// In a truncated preview the JSON is incomplete and will never parse. The whole
+// of it sits in working memory under the same handle — that is where it comes
+// from.
 //
-// Живой случай: префетч контекста оказался больше порога превью, и шаги ниже
-// получили пустые аргументы вместо полей — транспорт отверг вызовы, а шаг,
-// которому нужен был их вывод, остался ни с чем.
+// Live case: a context prefetch came out larger than the preview threshold, and
+// the steps below got empty arguments instead of fields — the transport rejected
+// the calls, and the step that needed their output was left with nothing.
 func TestFieldLookupFallsBackToWorkingMemory(t *testing.T) {
 	full := `{"head_sha":"deadbeef","delta_regex":"^(a|b)$","delta_scope":"go"}`
 	s := &state{
-		vars:   map[string]string{"ctx": `{"head_sha":"dead` + "…\n[mem:res-9 — это ПРЕВЬЮ, всего 42kb]"},
+		vars:   map[string]string{"ctx": `{"head_sha":"dead` + "…\n[mem:res-9 — this is a PREVIEW, 42kb in total]"},
 		memory: fakeMemory{"res-9": full},
 	}
 	assert.Equal(t, "deadbeef", s.lookup("ctx.head_sha"))
 	assert.Equal(t, "^(a|b)$", s.lookup("ctx.delta_regex"))
 }
 
-// Памяти нет — поле пустое, но хода это не роняет.
+// No memory — the field is empty, but that does not bring the turn down.
 func TestFieldLookupWithoutMemoryStaysEmpty(t *testing.T) {
 	s := &state{vars: map[string]string{"ctx": `{"head_sha":"dead` + "…\n[mem:res-9]"}}
 	assert.Equal(t, "", s.lookup("ctx.head_sha"))
 }
 
-// В АРГУМЕНТЫ значение едет целиком и без пометки хоста: там его читает скрипт,
-// а не модель. Хендл «[mem:id]» полезен модели и ломает разбор на том конце.
+// Into ARGUMENTS a value goes whole and without the host's note: there it is
+// read by a script, not by the model. The "[mem:id]" handle helps the model and
+// breaks parsing on the other end.
 //
-// Живой случай: render получал findings с хвостом и отвечал
-// «RENDER_ERROR: stdin не парсится как поток JSON».
+// Live case: render received findings with the tail and answered "RENDER_ERROR:
+// stdin does not parse as a JSON stream".
 func TestArgsGetCleanFullValue(t *testing.T) {
 	s := &state{
-		vars:   map[string]string{"findings": `{"a":1` + "…\n[mem:res-3 — это ПРЕВЬЮ, всего 42kb]"},
+		vars:   map[string]string{"findings": `{"a":1` + "…\n[mem:res-3 — this is a PREVIEW, 42kb in total]"},
 		memory: fakeMemory{"res-3": `{"a":1,"b":2}`},
 	}
 	args := s.expandArgs(map[string]any{"stdin": "{{findings}}"})
-	assert.Equal(t, `{"a":1,"b":2}`, args["stdin"], "целиком из памяти, без пометки")
+	assert.Equal(t, `{"a":1,"b":2}`, args["stdin"], "whole, from memory, without the note")
 }
 
-// В ИНСТРУКЦИИ пометка остаётся: по ней модель понимает, что данные обрезаны и
-// как дочитать остальное.
+// A host that still writes the Russian truncation note keeps working: the note
+// is a convention shared with the embedder, and dropping the old spelling would
+// silently put the tail back into call arguments.
+func TestArgsTrimLegacyRussianNote(t *testing.T) {
+	s := &state{vars: map[string]string{"findings": `{"a":1}` + "\n[обрезано: 42kb]"}}
+	args := s.expandArgs(map[string]any{"stdin": "{{findings}}"})
+	assert.Equal(t, `{"a":1}`, args["stdin"])
+}
+
+// In an INSTRUCTION the note stays: it is how the model learns the data is
+// truncated and how to read the rest.
 func TestInstructionKeepsMemHandle(t *testing.T) {
-	s := &state{vars: map[string]string{"ctx": "данные\n[mem:res-9]"}}
-	assert.Contains(t, s.expand("вот {{ctx}}"), "[mem:res-9]")
+	s := &state{vars: map[string]string{"ctx": "data\n[mem:res-9]"}}
+	assert.Contains(t, s.expand("here is {{ctx}}"), "[mem:res-9]")
 }

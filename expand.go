@@ -1,6 +1,6 @@
 package skillengine
 
-// Подстановка {{var}} и нормализация значений шага.
+// {{var}} substitution and normalisation of step values.
 
 import (
 	"encoding/json"
@@ -9,26 +9,28 @@ import (
 	"unicode"
 )
 
-// varRe ловит {{var}} и {{var.field}} — один уровень вложенности.
+// varRe catches {{var}} and {{var.field}} — one level of nesting.
 //
-// Глубже намеренно нет: наблюдаемые случаи плоские, а вложенность тянет за
-// собой индексы, фильтры и прочий шаблонизатор, которого формат избегает.
-// assetRe ловит {{asset:имя}} — подстановку содержимого нагрузки в ТЕКСТ
-// инструкции.
+// Deeper is deliberately absent: the observed cases are flat, and nesting
+// drags in indexes, filters and the rest of a template engine the format
+// avoids.
+// assetRe catches {{asset:name}} — substituting a payload's content into the
+// TEXT of an instruction.
 //
-// Отдельное пространство имён, а не общее с переменными: коллизия имён иначе
-// молча выигрывает у одного из двух, и автор не увидит, что именно подставилось.
+// A separate namespace rather than sharing one with variables: otherwise a
+// name collision silently beats one of the two, and the author cannot see what
+// was actually substituted.
 //
-// Так используют kind: text и data — справочник соответствий и шаблон ответа
-// бесполезны, если модель их не прочитает. Код и конфиг наоборот идут в
-// аргумент инструмента мимо модели.
+// This is how kind: text and data are used — a lookup table or a reply
+// template is useless unless the model reads it. Code and config go the other
+// way, into a tool argument past the model.
 var assetRe = regexp.MustCompile(`\{\{\s*asset:([a-zA-Z_][a-zA-Z0-9_-]*)\s*\}\}`)
 
 var varRe = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\s*\}\}`)
 
-// expand подставляет {{var}}. Неизвестная переменная превращается в пустую
-// строку, а не остаётся текстом: маркер, доехавший до модели, читается ею как
-// часть инструкции и порождает вопросы про «переменную var».
+// expand substitutes {{var}}. An unknown variable becomes an empty string
+// rather than staying as text: a marker that reaches the model reads to it as
+// part of the instruction and produces questions about "the variable var".
 func (s *state) expand(text string) string {
 	text = assetRe.ReplaceAllStringFunc(text, func(m string) string {
 		return s.asset(assetRe.FindStringSubmatch(m)[1])
@@ -38,20 +40,22 @@ func (s *state) expand(text string) string {
 	})
 }
 
-// expandForArgs — подстановка в АРГУМЕНТЫ вызова, а не в инструкцию.
+// expandForArgs — substitution into call ARGUMENTS, not into an instruction.
 //
-// Разница не косметическая. В переменной лежит то, что хост показал бы МОДЕЛИ:
-// крупное значение обрезано до превью, и к любому дописан хендл рабочей памяти
-// («[mem:id]»). Модели это в помощь — она видит, что данные есть и как их
-// дочитать. Скрипту на том конце вызова — мусор: он получает JSON с хвостом и
-// падает на разборе.
+// The difference is not cosmetic. A variable holds what the host would show
+// the MODEL: a large value is truncated to a preview, and a working-memory
+// handle ("[mem:id]") is appended to any of them. That helps the model — it
+// sees the data exists and how to read the rest. To the script on the other
+// end of the call it is garbage: it receives JSON with a tail and fails to
+// parse.
 //
-// Живой случай: шаг рендера получал в stdin результат шага
-// merge_findings вместе с хвостом «[mem:…]» и отвечал «RENDER_ERROR: stdin не
-// парсится как поток JSON»; ход умирал на гейте публикации, за два шага от
-// причины. Третье проявление одного класса — после доступа к полю и for_each.
+// Live case: a render step received the result of the merge_findings step in
+// stdin together with the "[mem:…]" tail and answered "RENDER_ERROR: stdin
+// does not parse as a JSON stream"; the turn died at the publication gate, two
+// steps away from the cause. The third manifestation of one class — after
+// field access and for_each.
 //
-// Поэтому в аргументы значение едет ЦЕЛИКОМ и БЕЗ пометки хоста.
+// So values go into arguments WHOLE and WITHOUT the host's note.
 func (s *state) expandForArgs(text string) string {
 	text = assetRe.ReplaceAllStringFunc(text, func(m string) string {
 		return s.asset(assetRe.FindStringSubmatch(m)[1])
@@ -61,11 +65,12 @@ func (s *state) expandForArgs(text string) string {
 	})
 }
 
-// asset достаёт содержимое нагрузки, добывая её при первом обращении.
+// asset returns a payload's content, fetching it on first use.
 //
-// Недоступный ассет разворачивается в ПУСТУЮ строку, как и неизвестная
-// переменная: маркер, доехавший до модели, читался бы ею как часть инструкции.
-// Отказ при этом не молчит — резолвер сообщает о нём вызывающему.
+// An unavailable asset expands to an EMPTY string, same as an unknown
+// variable: a marker that reached the model would read as part of the
+// instruction. The failure is not silent, though — the resolver reports it to
+// the caller.
 func (s *state) asset(name string) string {
 	if v, ok := s.assetCache[name]; ok {
 		return v
@@ -83,11 +88,12 @@ func (s *state) asset(name string) string {
 	return v
 }
 
-// lookup достаёт значение переменной или её поля.
+// lookup returns the value of a variable or of its field.
 //
-// Поле ищется в JSON-объекте, который шаг положил в переменную (структурный
-// ответ). Отсутствующее — пустая строка, как и отсутствующая переменная:
-// маркер, доехавший до модели, читался бы ею как часть инструкции.
+// A field is looked up in the JSON object a step stored in the variable (a
+// structured answer). A missing one yields an empty string, same as a missing
+// variable: a marker that reached the model would read as part of the
+// instruction.
 func (s *state) lookup(name string) string {
 	if v, ok := s.vars[name]; ok {
 		return v
@@ -118,16 +124,17 @@ func (s *state) lookup(name string) string {
 	return string(out)
 }
 
-// objectOf разбирает значение переменной как JSON-объект.
+// objectOf parses a variable's value as a JSON object.
 //
-// Значение переменной — это то, что хост показал БЫ модели, а не голый ответ
-// инструмента: к нему всегда дописан хендл рабочей памяти («[mem:id]»), а
-// крупный вдобавок обрезан до превью. И то и другое ломает разбор, поэтому
-// поле молча пустело у ЛЮБОГО результата `call:` — подстановка `{{var.field}}`
-// на таких переменных не работала никогда.
+// A variable's value is what the host WOULD show the model, not the raw tool
+// output: a working-memory handle ("[mem:id]") is always appended, and a large
+// one is truncated to a preview on top of that. Both break parsing, which is
+// why the field silently went empty for ANY `call:` result — {{var.field}}
+// substitution never worked on such variables.
 //
-// Порядок: снять пометку хоста и попробовать; не вышло (обрезано) — взять
-// целое из рабочей памяти по хендлу, он для того и дописан.
+// Order: strip the host's note and try; if that failed (truncated), take the
+// whole thing from working memory by the handle — that is what it is appended
+// for.
 func (s *state) objectOf(raw string) (map[string]any, bool) {
 	var obj map[string]any
 	if err := json.Unmarshal([]byte(trimHostNote(raw)), &obj); err == nil {
@@ -147,13 +154,14 @@ func (s *state) objectOf(raw string) (map[string]any, bool) {
 	return obj, true
 }
 
-// fullValue возвращает значение переменной ЦЕЛИКОМ.
+// fullValue returns a variable's value IN FULL.
 //
-// В переменной лежит то, что хост показал бы модели: крупный результат обрезан
-// до превью, а целое — в рабочей памяти под дописанным хендлом. Для промпта это
-// правильно, а для КОЛЛЕКЦИИ губительно: цикл по обрезанному списку молча
-// обработает часть и отдаст ответ, который выглядит полным (ровно то, ради чего
-// в for_each есть потолок с громким сообщением).
+// A variable holds what the host would show the model: a large result is
+// truncated to a preview, and the whole of it sits in working memory under the
+// appended handle. For a prompt that is right; for a COLLECTION it is fatal —
+// a loop over a truncated list silently processes part of it and returns an
+// answer that looks complete (exactly what the loud ceiling in for_each
+// exists for).
 func (s *state) fullValue(raw string) string {
 	id := memHandle(raw)
 	if id == "" || s.memory == nil {
@@ -166,24 +174,34 @@ func (s *state) fullValue(raw string) string {
 	return full
 }
 
-// trimHostNote срезает пометку, дописанную хостом к результату инструмента:
-// «[mem:id]» у целого и «…[mem:id — это ПРЕВЬЮ…]»/«…[обрезано: …]» у крупного.
-// Пометка всегда идёт последней строкой — её и режем, не трогая содержимое.
+// truncationNotes — how the host marks a truncated result. The Russian
+// "обрезано:" is kept alongside the English marker on purpose: this is a
+// convention shared with the embedding application, and dropping the old
+// spelling would silently stop trimming the note for hosts that still write
+// it — which puts the tail back into call arguments (see expandForArgs).
+var truncationNotes = []string{"mem:", "truncated:", "обрезано:"}
+
+// trimHostNote strips the note the host appends to a tool result: "[mem:id]"
+// for a whole one and "…[mem:id — this is a PREVIEW…]"/"…[truncated: …]" for a
+// large one. The note is always the last line — that is what gets cut, leaving
+// the content untouched.
 func trimHostNote(s string) string {
 	i := strings.LastIndex(s, "\n[")
 	if i < 0 {
 		return s
 	}
-	switch tail := s[i+2:]; {
-	case strings.HasPrefix(tail, "mem:"), strings.HasPrefix(tail, "обрезано:"):
-		return strings.TrimSuffix(strings.TrimSpace(s[:i]), "…")
+	tail := s[i+2:]
+	for _, note := range truncationNotes {
+		if strings.HasPrefix(tail, note) {
+			return strings.TrimSuffix(strings.TrimSpace(s[:i]), "…")
+		}
 	}
 	return s
 }
 
-// expandArgs подставляет {{var}} в СТРОКОВЫЕ значения аргументов, обходя
-// вложенные структуры. Числа, флаги и форма объекта остаются как записаны:
-// подстановка — про значения, а не про схему вызова.
+// expandArgs substitutes {{var}} into STRING argument values, walking nested
+// structures. Numbers, flags and object shape stay as written: substitution is
+// about values, not about the call's schema.
 func (s *state) expandArgs(args map[string]any) map[string]any {
 	if len(args) == 0 {
 		return nil
@@ -195,18 +213,20 @@ func (s *state) expandArgs(args map[string]any) map[string]any {
 	return out
 }
 
-// callArgs готовит аргументы шага `call:`: подстановка значений плюс перенос
-// маршрута доставки, объявленного ассетом.
+// callArgs prepares the arguments of a `call:` step: value substitution plus
+// carrying over the delivery route declared by an asset.
 //
-// Ассет объявляет `deliver`, а мост читает маршрут из `_deliver` в аргументах —
-// связать их было некому, и объявление оставалось украшением. Живой отказ
-// скилл объявлял `deliver: reply` у ассета-рендера, вывод
-// шага не помечался как ответ хода, и гейт публикации в MR отвергал ход целиком
-// («финальный шаг скилла не зафиксировал результат»). Ровно тот случай, когда
-// поле объявлено и валидируется, но живого эффекта не имеет.
+// An asset declares `deliver`, while the bridge reads the route from
+// `_deliver` in the arguments — there was nothing to connect them, so the
+// declaration stayed decorative. Live failure: a skill declared
+// `deliver: reply` on a render asset, the step's output was not marked as the
+// turn's answer, and the publication gate rejected the whole turn ("the
+// skill's final step did not record a result"). Exactly the case where a field
+// is declared and validated but has no live effect.
 //
-// Явный `_deliver` в аргументах шага сильнее: он написан для конкретного вызова,
-// а объявление ассета — умолчание для всех его потребителей.
+// An explicit `_deliver` in the step's arguments wins: it is written for that
+// specific call, whereas the asset's declaration is a default for all of its
+// consumers.
 func (s *state) callArgs(args map[string]any) map[string]any {
 	out := s.expandArgs(args)
 	if _, explicit := out["_deliver"]; explicit {
@@ -223,13 +243,13 @@ func (s *state) callArgs(args map[string]any) map[string]any {
 	return out
 }
 
-// assetDeliver возвращает маршрут доставки, объявленный первым ассетом, который
-// уходит в аргументы по ссылке.
+// assetDeliver returns the delivery route declared by the first asset that
+// goes into the arguments by reference.
 //
-// Значение передаётся КАК ЕСТЬ: имена маршрутов — словарь приложения, и движку
-// незачем их толковать. Пусто или "none" — доставки нет: это единственное
-// значение, которое движок понимает сам, потому что означает отказ от маршрута,
-// а не маршрут.
+// The value is passed AS IS: route names are the application's vocabulary and
+// the engine has no business interpreting them. Empty or "none" means no
+// delivery: that is the only value the engine understands itself, because it
+// means declining a route rather than naming one.
 func (s *state) assetDeliver(args map[string]any) string {
 	for _, name := range AssetRefsInArgs(args) {
 		a, ok := s.assets[name]
@@ -248,10 +268,10 @@ func (s *state) expandAny(v any) any {
 	case string:
 		return s.expandForArgs(t)
 	case map[string]any:
-		// {from: "asset:имя"} — ссылка на нагрузку. Содержимое подставляется
-		// ЗДЕСЬ, хост-сайд: шаг `call:` формируется описанием, а не моделью,
-		// поэтому нагрузка до модели не доходит вовсе — ровно то, ради чего
-		// ассеты и существуют.
+		// {from: "asset:name"} — a reference to a payload. The content is
+		// substituted HERE, host-side: a `call:` step is built by the skill and
+		// not by the model, so the payload never reaches the model at all —
+		// exactly what assets exist for.
 		if from, ok := t["from"].(string); ok && len(t) == 1 {
 			if name, isAsset := strings.CutPrefix(from, "asset:"); isAsset {
 				return s.asset(name)
@@ -269,56 +289,64 @@ func (s *state) expandAny(v any) any {
 	}
 }
 
-// normalizeOneOf сводит вольный ответ шага к одному из допустимых значений.
+// normalizeOneOf reduces a step's free-form answer to one of the allowed
+// values.
 //
-// Ищется ПОСЛЕДНЕЕ вхождение: модель часто перечисляет варианты, прежде чем
-// назвать выбранный («определить t1 или foreign… Результат: foreign»), и первое
-// совпадение — это перечисление, а не решение. Тот же приём, что и при снятии
-// вердикта из рассуждения.
+// The LAST occurrence is sought: a model often lists the options before naming
+// the chosen one ("decide between t1 and foreign… Result: foreign"), so the
+// first match is the enumeration, not the decision. Same trick as lifting a
+// verdict out of reasoning.
 func normalizeOneOf(text string, allowed []string) string {
 	if len(allowed) == 0 {
 		return text
 	}
 	trimmed := strings.Trim(strings.TrimSpace(text), "\"'`")
 
-	// 1. Ответ — ровно одно из значений. Так отвечает модель с грамматикой, и
-	//    так же чаще всего отвечает послушная модель без неё.
+	// 1. The answer is exactly one of the values. That is how a model with a
+	//    grammar answers, and usually how an obedient model without one does.
 	for _, want := range allowed {
 		if strings.EqualFold(trimmed, want) {
 			return want
 		}
 	}
 
-	// 2. Значение после маркера решения. Модель, которой велели ответить одним
-	//    словом, всё равно пишет «Итог: … Результат: foreign» — берём то, что
-	//    стоит ПОСЛЕ маркера, а не последнее в тексте.
+	// 2. The value after a decision marker. A model told to answer in one word
+	//    still writes "Summary: … Result: foreign" — take what stands AFTER
+	//    the marker rather than the last thing in the text.
 	if v, ok := afterDecisionMarker(trimmed, allowed); ok {
 		return v
 	}
 
-	// 3. Значение встретилось ровно одно (пусть и несколько раз) — берём его.
+	// 3. Exactly one value occurs (possibly several times) — take it.
 	if v, ok := onlyMentioned(trimmed, allowed); ok {
 		return v
 	}
 
-	// 4. Одно значение названо СТРОГО ЧАЩЕ другого: назвав выбор, модель обычно
-	//    его повторяет («нужно определить t1 или foreign; здесь foreign»).
-	//    Ровное число упоминаний решением не считается — именно на нём ломалась
-	//    прежняя версия.
+	// 4. One value is named STRICTLY more often than another: having named its
+	//    choice, a model usually repeats it ("we must decide between t1 and
+	//    foreign; this one is foreign"). An equal count is not a decision —
+	//    that is exactly where the previous version broke.
 	if v, ok := mostMentioned(trimmed, allowed); ok {
 		return v
 	}
 
-	// 5. Иначе — НИЧЕГО. Прежняя версия брала последнее вхождение и ошибалась
-	//    на «Это точно t1, а не foreign»: отрицание в конце — обычная русская
-	//    конструкция, и догадка давала прямо противоположный ответ. Пустое
-	//    значение уводит switch в default, где скилл может честно переспросить,
-	//    а неверная догадка молча ведёт ход не туда.
+	// 5. Otherwise — NOTHING. The previous version took the last occurrence and
+	//    got "this is definitely t1, not foreign" wrong: a trailing negation is
+	//    an ordinary construction (and the default word order in Russian), so
+	//    the guess produced the exact opposite answer. An empty value sends the
+	//    switch to its default, where the skill can honestly ask again, while a
+	//    wrong guess silently steers the turn elsewhere.
 	return ""
 }
 
-// decisionMarkers — слова, после которых модель называет выбор.
-var decisionMarkers = []string{"результат:", "итог:", "ответ:", "вывод:", "выбор:", "решение:"}
+// decisionMarkers — words after which a model names its choice.
+//
+// Both languages are listed, and the list is not a place to economise: a
+// missing marker costs a wrong branch, while an extra one costs nothing.
+var decisionMarkers = []string{
+	"result:", "summary:", "answer:", "conclusion:", "choice:", "decision:", "verdict:",
+	"результат:", "итог:", "ответ:", "вывод:", "выбор:", "решение:",
+}
 
 func afterDecisionMarker(text string, allowed []string) (string, bool) {
 	low := strings.ToLower(text)
@@ -341,7 +369,7 @@ func afterDecisionMarker(text string, allowed []string) (string, bool) {
 	return best, best != ""
 }
 
-// mostMentioned возвращает значение, упомянутое строго чаще остальных.
+// mostMentioned returns the value mentioned strictly more often than the rest.
 func mostMentioned(text string, allowed []string) (string, bool) {
 	low := strings.ToLower(text)
 	best, bestN, tie := "", 0, false
@@ -366,7 +394,7 @@ func onlyMentioned(text string, allowed []string) (string, bool) {
 	for _, want := range allowed {
 		if countWholeWord(low, strings.ToLower(want)) > 0 {
 			if found != "" && !strings.EqualFold(found, want) {
-				return "", false // упомянуто несколько — выбирать нельзя
+				return "", false // several mentioned — cannot choose
 			}
 			found = want
 		}
@@ -374,13 +402,14 @@ func onlyMentioned(text string, allowed []string) (string, bool) {
 	return found, found != ""
 }
 
-// countWholeWord считает вхождения needle как ОТДЕЛЬНОГО слова.
+// countWholeWord counts occurrences of needle as a SEPARATE word.
 //
-// Простой Count врёт, когда одно допустимое значение содержится в другом:
-// в наборе [found, not_found] ответ «not_found» засчитывался обоим, оба слоя
-// видели ничью и возвращали пустоту — шаг молча оставался без значения, switch
-// уходил в default, и ход отвечал служебной переменной. Границей считается всё, кроме букв, цифр и подчёркивания:
-// подчёркивание — часть имён вроде not_found.
+// A plain Count lies when one allowed value is contained in another: with the
+// set [found, not_found] the answer "not_found" was credited to both, both
+// layers saw a tie and returned nothing — the step silently ended up without a
+// value, the switch went to its default, and the turn answered with an
+// internal variable. A boundary is anything but letters, digits and
+// underscore: the underscore is part of names like not_found.
 func countWholeWord(text, needle string) int {
 	if needle == "" {
 		return 0
@@ -399,8 +428,8 @@ func countWholeWord(text, needle string) int {
 	}
 }
 
-// isWordBoundary сообщает, что позиция вне слова: за пределами строки либо
-// не буква/цифра/подчёркивание.
+// isWordBoundary reports that the position is outside a word: past the end of
+// the string, or not a letter/digit/underscore.
 func isWordBoundary(text string, i int) bool {
 	if i < 0 || i >= len(text) {
 		return true
@@ -409,18 +438,18 @@ func isWordBoundary(text string, i int) bool {
 	return r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r)
 }
 
-// MemSuffix — суффикс переменной с хендлом рабочей памяти: результат шага
-// `save_as: pods` кладёт хендл в `pods.mem`.
+// MemSuffix — the suffix of the variable holding a working-memory handle: the
+// result of a `save_as: pods` step puts the handle into `pods.mem`.
 const MemSuffix = ".mem"
 
-// memRefRe ловит хендл рабочей памяти в тексте результата. Формат «[mem:id]» —
-// общая конвенция хоста и движка: так хендл видит и модель в превью, и описание
-// скилла в подстановке. Разбором текста, а не расширением интерфейса, потому что
-// хендл и предназначен для того, чтобы его читали из текста.
+// memRefRe catches a working-memory handle in result text. The "[mem:id]" form
+// is a convention shared by the host and the engine: that is how the handle is
+// seen both by the model in a preview and by the skill in substitution. Parsed
+// out of text rather than added to an interface, because the handle is meant
+// to be read from text in the first place.
 var memRefRe = regexp.MustCompile(`\[mem:([a-zA-Z0-9_-]+)`)
 
-// memHandle возвращает хендл рабочей памяти из результата инструмента, если он
-// там есть.
+// memHandle returns the working-memory handle from a tool result, if present.
 func memHandle(text string) string {
 	if m := memRefRe.FindStringSubmatch(text); m != nil {
 		return m[1]
@@ -428,6 +457,6 @@ func memHandle(text string) string {
 	return ""
 }
 
-// SkippedSuffix — суффикс переменной со списком пропущенных веток развилки:
-// `collect: findings` кладёт их в `findings.skipped`.
+// SkippedSuffix — the suffix of the variable holding the list of skipped
+// branches: `collect: findings` puts them into `findings.skipped`.
 const SkippedSuffix = ".skipped"

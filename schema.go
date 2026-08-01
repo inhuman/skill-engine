@@ -7,31 +7,32 @@ import (
 	"strings"
 )
 
-// Unmarshal — разбор YAML в структуру. Движок НЕ тянет yaml-библиотеку сам:
-// описание скиллов всё равно читает встраивающее приложение, у него уже есть свой разбор, и
-// вторая копия здесь стала бы его зависимостью — с его версиями и его
-// конфликтами. Нужен ровно один метод, поэтому это функция, а не интерфейс.
+// Unmarshal — parsing YAML into a struct. The engine does NOT pull in a yaml
+// library itself: the skill description is read by the embedding application
+// anyway, it already has a parser, and a second copy here would become its
+// dependency — with its versions and its conflicts. Exactly one method is
+// needed, so this is a function rather than an interface.
 //
-// Подходит `yaml.Unmarshal` из gopkg.in/yaml.v3 без обёртки.
+// `yaml.Unmarshal` from gopkg.in/yaml.v3 fits without a wrapper.
 type Unmarshal func(data []byte, v any) error
 
-// SchemaYAML — контракт формата скилла (JSON Schema, записанная в YAML).
+// SchemaYAML — the skill format contract (JSON Schema written in YAML).
 //
-// Живёт рядом с движком, а не только в спеке: по ней валидируется скилл при
-// записи, её же отдают модели, когда та пишет скилл по просьбе человека.
-// Спека () — документация; источник истины
-// для кода здесь.
+// It lives next to the engine, not only in the spec: skills are validated
+// against it on write, and it is handed to the model when it writes a skill on
+// a human's request. The spec is documentation; the source of truth for code
+// is here.
 //
 //go:embed skill.schema.yaml
 var SchemaYAML string
 
-// SchemaSummary — компактная справка по формату: поля и первая строка описания
-// каждого.
+// SchemaSummary — a compact reference for the format: the fields and the first
+// line of each description.
 //
-// Полная схема — 56 КБ. Отдать их модели значит съесть контекст ради
-// справочника: тот же класс удушения, от которого формат защищает усечением
-// результатов инструментов. Автору скилла нужен перечень полей и смысл каждого;
-// подробности — в спеке, для человека.
+// The full schema is 56 KB. Handing that to a model means spending context on
+// a reference book: the same kind of suffocation the format protects against
+// by truncating tool results. A skill author needs the list of fields and what
+// each means; the details are in the spec, for humans.
 func SchemaSummary(unmarshal Unmarshal) string {
 	if unmarshal == nil {
 		return ""
@@ -54,7 +55,7 @@ func SchemaSummary(unmarshal Unmarshal) string {
 		} `yaml:"$defs"`
 	}
 	if err := unmarshal([]byte(SchemaYAML), &root); err != nil {
-		return "" // схема битая — пусть вызывающий отдаст полную
+		return "" // schema is broken — let the caller hand out the full one
 	}
 
 	req := map[string]bool{}
@@ -63,7 +64,7 @@ func SchemaSummary(unmarshal Unmarshal) string {
 	}
 
 	var b strings.Builder
-	b.WriteString("ФОРМАТ СКИЛЛА (обязательные помечены *)\n\n")
+	b.WriteString("SKILL FORMAT (required fields marked *)\n\n")
 	for _, name := range sortedKeys(root.Properties) {
 		p := root.Properties[name]
 		mark := " "
@@ -73,13 +74,14 @@ func SchemaSummary(unmarshal Unmarshal) string {
 		fmt.Fprintf(&b, "%s %-22s %s\n", mark, name, firstLine(p.Description))
 	}
 
-	b.WriteString("\nШАГ (ровно одно действие: instruction | call | set | switch | if | exit | delegate | for_each | parallel)\n\n")
+	b.WriteString("\nSTEP (exactly one action: instruction | call | set | switch | if | exit | delegate | for_each | parallel)\n\n")
 	if step, ok := root.Defs["Step"]; ok {
 		for _, name := range sortedKeys(step.Properties) {
 			f := step.Properties[name]
 			desc := firstLine(f.Description)
 			if desc == "" {
-				// Поле-ссылка: описание лежит у типа, на который оно ссылается.
+				// A reference field: the description lives on the type it
+				// points at.
 				if d, ok := root.Defs[capitalizeRef(name)]; ok {
 					desc = firstLine(d.Description)
 				}
@@ -88,7 +90,7 @@ func SchemaSummary(unmarshal Unmarshal) string {
 		}
 	}
 
-	b.WriteString("\nОСТАЛЬНЫЕ КОНСТРУКЦИИ\n\n")
+	b.WriteString("\nOTHER CONSTRUCTS\n\n")
 	for _, name := range sortedKeys(root.Defs) {
 		if name == "Step" {
 			continue
@@ -98,7 +100,8 @@ func SchemaSummary(unmarshal Unmarshal) string {
 	return b.String()
 }
 
-// capitalizeRef переводит имя поля в имя типа: for_each → ForEach, call → Call.
+// capitalizeRef turns a field name into a type name: for_each → ForEach,
+// call → Call.
 func capitalizeRef(field string) string {
 	parts := strings.Split(field, "_")
 	for i, p := range parts {
@@ -111,10 +114,6 @@ func capitalizeRef(field string) string {
 
 func firstLine(s string) string {
 	line, _, _ := strings.Cut(strings.TrimSpace(s), "\n")
-	// «[есть] …», «[спека] …» — пометки статуса, автору скилла они не нужны.
-	if i := strings.Index(line, "] "); i > 0 && strings.HasPrefix(line, "[") {
-		line = line[i+2:]
-	}
 	return line
 }
 

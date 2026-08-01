@@ -1,6 +1,6 @@
 package skillengine
 
-// Исполнение отдельных типов шага и политика отказа.
+// Executing individual step kinds, and the failure policy.
 
 import (
 	"context"
@@ -13,8 +13,9 @@ import (
 	"time"
 )
 
-// stepName — имя шага для следа и прогресса. Имя необязательно, а пустое в
-// ленте не читается: у ветвлений роль видна по типу.
+// stepName — the step's name for the trace and for progress. A name is
+// optional, and an empty one is unreadable in a feed: for branches the role is
+// visible from the kind.
 func stepName(step Step) string {
 	if step.Name != "" {
 		return step.Name
@@ -22,7 +23,7 @@ func stepName(step Step) string {
 	return stepKind(step)
 }
 
-// stepKind — тип шага для следа.
+// stepKind — the step's kind, for the trace.
 func stepKind(step Step) string {
 	switch {
 	case step.Call != nil:
@@ -50,7 +51,7 @@ func (s *state) trace(step Step, outcome, reason string, calls int, started time
 	s.traceCalls(step, outcome, reason, calls, 0, started)
 }
 
-// traceCalls — след шага с разбивкой вызовов на все и отказавшие.
+// traceCalls — a step trace splitting calls into all and failed.
 func (s *state) traceCalls(step Step, outcome, reason string, calls, failed int, started time.Time) {
 	kind := stepKind(step)
 	name := stepName(step)
@@ -70,18 +71,19 @@ func (s *state) one(ctx context.Context, step Step) (bool, error) {
 	if s.onStepStart != nil {
 		s.onStepStart(stepName(step), stepKind(step))
 	}
-	// Условие применимости проверяется ДО действия: шаг, чьё предусловие
-	// ложно, не исполняется вовсе — ни модель, ни инструмент не зовутся.
+	// The applicability condition is checked BEFORE the action: a step whose
+	// precondition is false does not run at all — neither the model nor a tool
+	// is called.
 	if step.When != "" {
 		ok, err := s.eval(step.When)
 		if err != nil {
-			return false, fmt.Errorf("шаг %q: when: %w", stepLabel(step), err)
+			return false, fmt.Errorf("step %q: when: %w", stepLabel(step), err)
 		}
 		if !ok {
 			s.skipped = append(s.skipped, stepLabel(step))
-			// Пропуск — не «ничего не произошло»: это единственный след того,
-			// что задача подошла скиллу частично.
-			s.trace(step, "skipped", "условие "+step.When+" ложно", 0, started)
+			// A skip is not "nothing happened": it is the only trace of the
+			// task having matched the skill only partially.
+			s.trace(step, "skipped", "condition "+step.When+" is false", 0, started)
 			return false, nil
 		}
 	}
@@ -91,27 +93,29 @@ func (s *state) one(ctx context.Context, step Step) (bool, error) {
 		s.trace(step, "ok", "", 0, started)
 		return false, nil
 
-	// Ветвление ПОГЛОЩАЕТ сигнал skip: он означает «пропустить остаток ТЕКУЩЕЙ
-	// ветки», а не «прервать поток». Иначе необязательный шаг внутри ветки
-	// уносил бы с собой весь остаток скилла — для полной остановки есть abort.
+	// A branch ABSORBS the skip signal: it means "skip the rest of the CURRENT
+	// branch", not "abort the flow". Otherwise an optional step inside a branch
+	// would take the whole remainder of the skill with it — for a full stop
+	// there is abort.
 	case step.Switch != nil:
 		key := strings.TrimSpace(s.lookup(step.Switch.Var))
 		branch, ok := step.Switch.Cases[key]
 		chosen, outcome := key, "ok"
 		if !ok {
 			branch = step.Switch.Default
-			// Уход в default — частая причина «скилл ответил не то»: значение
-			// не совпало ни с одной веткой. В следе это видно сразу.
-			chosen = "default (значение " + key + ")"
+			// Falling through to default is a common cause of "the skill
+			// answered the wrong thing": the value matched no branch. In the
+			// trace that is visible immediately.
+			chosen = "default (value " + key + ")"
 			if len(branch) == 0 {
-				// Пустой default при непустых ветках — не «нечего делать», а
-				// провал ветвления: работа, ради которой шаг существовал, не
-				// сделана, а поток идёт дальше как ни в чём не бывало. Отказ
-				// обязан быть громким, иначе он выглядит успехом (живой случай
-				// verdict оказался пуст, ни одна ветка не отработала, и
-				// ход ответил служебной переменной).
+				// An empty default with non-empty cases is not "nothing to
+				// do", it is a failed branch: the work the step existed for
+				// was not done, while the flow carries on as if nothing
+				// happened. A failure must be loud, otherwise it looks like
+				// success (live case: verdict came out empty, no branch ran,
+				// and the turn answered with an internal variable).
 				outcome = "degraded"
-				chosen = "ни одна ветка не подошла (значение " + key + "), default пуст"
+				chosen = "no branch matched (value " + key + "), default is empty"
 			}
 		}
 		s.trace(step, outcome, chosen, 0, started)
@@ -152,16 +156,17 @@ func (s *state) one(ctx context.Context, step Step) (bool, error) {
 	case step.Run != nil:
 		return s.runStep(ctx, step)
 	}
-	return false, fmt.Errorf("skill-engine: шаг %q ничего не делает", step.Name)
+	return false, fmt.Errorf("skill-engine: step %q does nothing", step.Name)
 }
 
 func (s *state) runStep(ctx context.Context, step Step) (bool, error) {
 	run := step.Run
 	tools := s.toolsFor(run)
 	if step.OnServer != "" {
-		// Радиус шага сужается до одного сервера: сегодня скилл на пять
-		// кластеров отдаёт модели инструменты ВСЕХ пяти, и она может позвать
-		// не тот. Сужение делает ошибку невозможной, а не маловероятной.
+		// The step's radius narrows to a single server: today a skill spanning
+		// five clusters hands the model the tools of ALL five, and it can call
+		// the wrong one. Narrowing makes the mistake impossible rather than
+		// unlikely.
 		only := s.expand(step.OnServer)
 		if err := s.allowServer(only); err != nil {
 			return s.onError(step, err)
@@ -188,30 +193,32 @@ func (s *state) runStep(ctx context.Context, step Step) (bool, error) {
 		s.traceCalls(step, outcomeFor(err), err.Error(), res.Calls, res.CallsFailed, started)
 		return s.onError(step, err)
 	}
-	// Шаг отработал без единого слова — это отказ, а не успех: работа, ради
-	// которой шаг существовал, не сделана. Живой класс — gpt-oss кладёт ответ в
-	// reasoning_content и оставляет content пустым; шаг записывался как ok, а
-	// ход отвечал служебной переменной. Отказ обязан быть громким.
+	// A step that finished without a single word is a failure, not a success:
+	// the work it existed for was not done. Live class — gpt-oss puts the
+	// answer into reasoning_content and leaves content empty; the step was
+	// recorded as ok while the turn answered with an internal variable. A
+	// failure must be loud.
 	switch {
-	// Причина исполнителя точнее любой выведенной здесь — она первая.
+	// The executor's own reason is more precise than anything derived here —
+	// it comes first.
 	case res.Note != "":
 		s.traceCalls(step, "degraded", res.Note, res.Calls, res.CallsFailed, started)
 	case strings.TrimSpace(res.Text) == "":
-		s.traceCalls(step, "degraded", "шаг не дал текста", res.Calls, res.CallsFailed, started)
-	// Все вызовы отказали — шаг НЕ отработал, даже если текст остался от модели.
-	// Иначе ход с семью отвергнутыми вызовами пишется как успешный, и причина
-	// ищется в логах пода.
+		s.traceCalls(step, "degraded", "step produced no text", res.Calls, res.CallsFailed, started)
+	// Every call failed — the step did NOT do its job, even if some text came
+	// from the model. Otherwise a turn with seven rejected calls is recorded as
+	// a success and the reason is hunted for in pod logs.
 	case res.Calls > 0 && res.CallsFailed == res.Calls:
 		s.traceCalls(step, "degraded",
-			fmt.Sprintf("все вызовы инструментов отказали (%d)", res.CallsFailed),
+			fmt.Sprintf("all tool calls failed (%d)", res.CallsFailed),
 			res.Calls, res.CallsFailed, started)
 	default:
 		s.traceCalls(step, "ok", "", res.Calls, res.CallsFailed, started)
 	}
-	// Шаг без save_as — финальный ответ хода, а не выброшенная работа. Раньше его
-	// результат не сохранялся никуда: скилл отрабатывал, отвечать было нечем, и
-	// ход отдавал самую длинную служебную переменную — то есть разбор первого
-	// шага.
+	// A step without save_as is the turn's final answer, not discarded work.
+	// Its result used to be stored nowhere: the skill ran, there was nothing to
+	// answer with, and the turn handed out the longest internal variable — that
+	// is, the parse of the first step.
 	target := run.SaveAs
 	if target == "" {
 		target = AnswerVar
@@ -223,13 +230,13 @@ func (s *state) runStep(ctx context.Context, step Step) (bool, error) {
 	return false, nil
 }
 
-// callStep зовёт инструмент напрямую, без модели.
+// callStep calls a tool directly, without the model.
 func (s *state) callStep(ctx context.Context, step Step) (bool, error) {
 	call := step.Call
 	server, tool, _ := SplitToolRef(call.Tool)
 	if step.OnServer != "" {
-		// Сервер назван шагом — имя инструмента в call.tool может быть без
-		// префикса. Вычисленное имя проходит ту же проверку набора.
+		// The server is named by the step — the tool name in call.tool may come
+		// without a prefix. The computed name goes through the same set check.
 		server = s.expand(step.OnServer)
 		if _, bare, ok := SplitToolRef(call.Tool); ok {
 			tool = bare
@@ -239,16 +246,17 @@ func (s *state) callStep(ctx context.Context, step Step) (bool, error) {
 	}
 
 	started := time.Now()
-	// Отказы ДО вызова тоже оставляют след: без него шаг, отклонённый радиусом,
-	// исчезал из трассы бесследно — под политикой continue поток шёл дальше, а
-	// в событиях не было ни шага, ни причины: живой промах — два шага молча
-	// выпали, и это выглядело как их отсутствие в описании.
+	// Failures BEFORE the call leave a trace too: without it a step rejected by
+	// the radius vanished from the trace without a trace — under the continue
+	// policy the flow moved on, and the events held neither the step nor a
+	// reason: a live miss where two steps silently dropped out, and it looked
+	// like they were absent from the skill.
 	if err := s.allowServer(server); err != nil {
 		s.trace(step, outcomeFor(err), err.Error(), 0, started)
 		return s.onError(step, err)
 	}
 	if s.caller == nil {
-		err := errors.New("вызов инструментов недоступен")
+		err := errors.New("tool calls are unavailable")
 		s.trace(step, outcomeFor(err), err.Error(), 0, started)
 		return s.onError(step, err)
 	}
@@ -262,11 +270,12 @@ func (s *state) callStep(ctx context.Context, step Step) (bool, error) {
 	if call.SaveAs != "" {
 		s.set(call.SaveAs, out)
 		s.noteAnswerWriter(call.SaveAs, stepKind(step))
-		// Крупный результат хост кладёт в рабочую память и возвращает превью с
-		// хендлом. Сам хендл нужен следующему шагу, чтобы передать данные ПО
-		// ССЫЛКЕ: args: {stdin: {from: "{{имя.mem}}"}} — тогда мегабайтный json
-		// уходит в код, минуя контекст модели. Без этого программа умеет
-		// работать только с тем, что влезает в превью.
+		// A large result is put into working memory by the host, which returns
+		// a preview with a handle. The handle itself is what the next step
+		// needs to pass data BY REFERENCE: args: {stdin: {from: "{{name.mem}}"}}
+		// — then a megabyte of json goes into the code, bypassing the model's
+		// context. Without it a program can only work with what fits into a
+		// preview.
 		if id := memHandle(out); id != "" {
 			s.set(call.SaveAs+MemSuffix, id)
 		}
@@ -274,12 +283,12 @@ func (s *state) callStep(ctx context.Context, step Step) (bool, error) {
 	return false, nil
 }
 
-// delegateStep передаёт работу другому скиллу.
+// delegateStep hands the work to another skill.
 func (s *state) delegateStep(ctx context.Context, step Step) (bool, error) {
 	d := step.Delegate
 	started := time.Now()
 	if s.delegate == nil {
-		err := errors.New("делегирование скиллам недоступно")
+		err := errors.New("delegation to skills is unavailable")
 		s.trace(step, outcomeFor(err), err.Error(), 0, started)
 		return s.onError(step, err)
 	}
@@ -288,10 +297,10 @@ func (s *state) delegateStep(ctx context.Context, step Step) (bool, error) {
 		s.trace(step, outcomeFor(err), err.Error(), 0, started)
 		return s.onError(step, err)
 	}
-	// Делегирование — спавн субагента, самая дорогая операция хода. Без следа
-	// оно невидимо и в событиях, и в прогресс-посте: человек смотрит на
-	// «думаю…», пока минуту работает другой скилл.
-	s.trace(step, "ok", "скилл "+d.Skill, 1, started)
+	// Delegation spawns a subagent — the most expensive operation of a turn.
+	// Without a trace it is invisible in both events and the progress post: a
+	// human stares at "thinking…" while another skill works for a minute.
+	s.trace(step, "ok", "skill "+d.Skill, 1, started)
 	if d.SaveAs != "" {
 		s.set(d.SaveAs, out)
 		s.noteAnswerWriter(d.SaveAs, stepKind(step))
@@ -299,22 +308,23 @@ func (s *state) delegateStep(ctx context.Context, step Step) (bool, error) {
 	return false, nil
 }
 
-// forEachStep повторяет шаги по коллекции.
+// forEachStep repeats steps over a collection.
 //
-// Потолок применяется ВСЕГДА: список длиннее — обрабатывается частично, и об
-// этом ГОВОРИТСЯ в результате. Молча обработать половину значит отдать ответ,
-// который выглядит полным.
+// The ceiling ALWAYS applies: a longer list is processed partially, and that is
+// SAID OUT LOUD in the result. Silently processing half means handing out an
+// answer that looks complete.
 func (s *state) forEachStep(ctx context.Context, step Step) (bool, error) {
 	fe := step.ForEach
 	started := time.Now()
-	// `in` резолвится как ЛЮБАЯ другая ссылка — включая поле (`parts.stdout`).
-	// Прямой доступ к переменной этого не умел, и цикл по результату exec
-	// обходил КОНВЕРТ {"exit_code":0,"stdout":"…"} вместо строк скрипта: одна
-	// итерация вместо пяти. Ревью MR на 155 правок вышло пустым, и выглядело
-	// это как «модель ничего не нашла» ().
+	// `in` resolves like ANY other reference — including a field
+	// (`parts.stdout`). Direct variable access could not do that, and a loop
+	// over an exec result walked the ENVELOPE {"exit_code":0,"stdout":"…"}
+	// instead of the script's lines: one iteration instead of five. A review of
+	// a 155-change MR came out empty, and it looked like "the model found
+	// nothing".
 	//
-	// Коллекцию берём ЦЕЛИКОМ: в переменной лежит превью, а обрезанный список
-	// дал бы частичный обход, который выглядит полным.
+	// The collection is taken WHOLE: the variable holds a preview, and a
+	// truncated list would give a partial walk that looks complete.
 	items := splitCollection(s.fullValue(s.lookup(fe.In)))
 	total := len(items)
 	limit := fe.MaxIterations
@@ -325,8 +335,9 @@ func (s *state) forEachStep(ctx context.Context, step Step) (bool, error) {
 		items = items[:limit]
 	}
 
-	// Собирается значение переменной с именем collect: шаг внутри цикла пишет
-	// в неё через save_as, и после каждой итерации значение забирается.
+	// The value of the variable named by collect is assembled here: a step
+	// inside the loop writes into it via save_as, and the value is taken after
+	// each iteration.
 	var collected []string
 	failed := 0
 	for _, item := range items {
@@ -349,29 +360,30 @@ func (s *state) forEachStep(ctx context.Context, step Step) (bool, error) {
 	if fe.Collect != "" {
 		out := strings.Join(nonEmpty(collected), "\n\n")
 		if total > limit {
-			// Частичная обработка ГОВОРИТСЯ вслух: молча обработанная половина
-			// даёт ответ, который выглядит полным.
-			out += fmt.Sprintf("\n\n(обработано %d из %d — упёрлись в потолок итераций)", limit, total)
+			// Partial processing is SAID OUT LOUD: a silently processed half
+			// gives an answer that looks complete.
+			out += fmt.Sprintf("\n\n(processed %d of %d — hit the iteration ceiling)", limit, total)
 		}
 		s.set(fe.Collect, out)
 	}
-	// Цикл — самый дорогой шаг после делегирования: N итераций, у каждой свои
-	// вызовы. Без следа не видно ни сколько их было, ни сколько отвалилось.
-	outcome, reason := "ok", fmt.Sprintf("итераций: %d", len(items))
+	// A loop is the most expensive step after delegation: N iterations, each
+	// with its own calls. Without a trace neither their number nor how many
+	// fell over is visible.
+	outcome, reason := "ok", fmt.Sprintf("iterations: %d", len(items))
 	if total > limit {
 		outcome = "degraded"
-		reason = fmt.Sprintf("итераций: %d из %d — потолок", limit, total)
+		reason = fmt.Sprintf("iterations: %d of %d — ceiling", limit, total)
 	}
 	if failed > 0 {
 		outcome = "degraded"
-		reason += fmt.Sprintf(", отказали: %d", failed)
+		reason += fmt.Sprintf(", failed: %d", failed)
 	}
 	s.trace(step, outcome, reason, len(items), started)
 	return false, nil
 }
 
-// outcomeFor различает отказ по правам и прочий сбой: на первое повторы
-// бессмысленны, и в событиях это разные истории.
+// outcomeFor tells a permission refusal from any other failure: retrying the
+// former is pointless, and in events they are different stories.
 func outcomeFor(err error) string {
 	if errors.Is(err, ErrDenied) {
 		return "denied"
@@ -379,8 +391,8 @@ func outcomeFor(err error) string {
 	return "error"
 }
 
-// splitCollection разбирает значение переменной в список элементов: JSON-массив
-// или строки. Второе — наблюдаемый случай: список, добытый инструментом.
+// splitCollection parses a variable's value into a list of items: a JSON array
+// or lines. The latter is the observed case: a list produced by a tool.
 func splitCollection(v string) []string {
 	v = strings.TrimSpace(v)
 	if v == "" {
@@ -409,17 +421,17 @@ func nonEmpty(in []string) []string {
 	return out
 }
 
-// parallelStep исполняет ветки одновременно.
+// parallelStep runs branches simultaneously.
 //
-// Каждая получает КОПИЮ переменных и своё состояние: ветки не видят работы
-// друг друга. Иначе исход зависел бы от того, кто финишировал первым, — а
-// формат существует ради предсказуемости, и недетерминизм тут был бы вшит в
-// конструкцию.
+// Each gets a COPY of the variables and its own state: branches do not see each
+// other's work. Otherwise the outcome would depend on who finished first — and
+// the format exists for predictability, so non-determinism here would be built
+// into the construct.
 //
-// Обратно в поток попадают только переменные, произведённые ветками; конфликт
-// имён разрешается порядком объявления (позже — сильнее), и это осознанный
-// выбор: альтернатива — запрещать одинаковые save_as, что мешает симметричным
-// веткам вроде «поищи в двух источниках».
+// Only the variables produced by the branches make it back into the flow; a
+// name conflict is resolved by declaration order (later wins), and that is a
+// deliberate choice: the alternative is forbidding identical save_as, which
+// gets in the way of symmetric branches like "search two sources".
 func (s *state) parallelStep(ctx context.Context, step Step) (bool, error) {
 	p := step.Parallel
 	started := time.Now()
@@ -446,7 +458,7 @@ func (s *state) parallelStep(ctx context.Context, step Step) (bool, error) {
 				onStepStart: s.onStepStart,
 			}
 			for k := range sub.vars {
-				sub.seeded[k] = true // всё, что было до развилки, — вход ветки
+				sub.seeded[k] = true // everything from before the fork is the branch's input
 			}
 			_, err := sub.run(ctx, branch)
 			results[i] = result{vars: sub.produced(), skipped: sub.skipped, err: err}
@@ -458,8 +470,8 @@ func (s *state) parallelStep(ctx context.Context, step Step) (bool, error) {
 	for _, r := range results {
 		s.skipped = append(s.skipped, r.skipped...)
 		if r.err != nil {
-			// Выход из скилла — решение всего хода, а не одной ветки: его
-			// нельзя проглотить политикой continue.
+			// Exiting the skill is a decision for the whole turn, not for one
+			// branch: it must not be swallowed by the continue policy.
 			if errors.Is(r.err, ErrExit) {
 				return false, r.err
 			}
@@ -477,11 +489,12 @@ func (s *state) parallelStep(ctx context.Context, step Step) (bool, error) {
 	}
 	if p.Collect != "" {
 		s.set(p.Collect, strings.Join(collected, "\n\n"))
-		// Пропущенные ветки — отдельной переменной `<collect>.skipped`, тем же
-		// приёмом, что и `<save_as>.mem`. Без неё шаг, формулирующий ответ,
-		// видит только собранное и не отличает «источник ответил пусто» от
-		// «в источник не ходили»: живой случай — скилл поиска написал «в
-		// в трекере по теме пусто», не сделав туда ни одного запроса.
+		// Skipped branches go into a separate variable `<collect>.skipped`, by
+		// the same trick as `<save_as>.mem`. Without it the step that words the
+		// answer sees only what was collected and cannot tell "the source
+		// answered nothing" from "we never went to the source": live case — a
+		// search skill wrote "the tracker has nothing on the topic" without
+		// making a single query there.
 		var skippedNames []string
 		for _, r := range results {
 			skippedNames = append(skippedNames, r.skipped...)
@@ -490,79 +503,82 @@ func (s *state) parallelStep(ctx context.Context, step Step) (bool, error) {
 			s.set(p.Collect+SkippedSuffix, strings.Join(skippedNames, ", "))
 		}
 	}
-	// Ветки трассируются каждая сама (state ветки несёт тот же колбэк), но сам
-	// развилочный шаг — нет, и в следе пропадала бы граница: сколько веток
-	// пошло и сколько из них отказало. Отказавшая ветка под политикой continue
-	// иначе неотличима от не запускавшейся.
+	// Branches trace themselves (a branch's state carries the same callback),
+	// but the fork step itself does not, and the trace would lose the boundary:
+	// how many branches went and how many of them failed. A failed branch under
+	// the continue policy would otherwise be indistinguishable from one that
+	// never started.
 	failed, ran := 0, 0
 	for _, r := range results {
 		if r.err != nil {
 			failed++
 			continue
 		}
-		// Ветка, пропущенная по `when`, работы не сделала. Отличать её от
-		// отработавшей нужно потому, что развилка, где пропущены ВСЕ ветки,
-		// не собрала ничего — а следующий шаг всё равно сформулирует ответ,
-		// и он будет выглядеть законченным (живой класс: скилл поиска без единой
-		// выбранной пробы отвечал так же уверенно, как с двумя).
+		// A branch skipped by `when` did no work. Telling it apart from one
+		// that ran matters because a fork where ALL branches were skipped
+		// collected nothing — and the next step will word an answer anyway, and
+		// it will look complete (live class: a search skill with not a single
+		// probe selected answered just as confidently as with two).
 		if len(r.skipped) == 0 || len(r.vars) > 0 {
 			ran++
 		}
 	}
-	outcome, reason := "ok", fmt.Sprintf("веток: %d", len(p.Branches))
+	outcome, reason := "ok", fmt.Sprintf("branches: %d", len(p.Branches))
 	switch {
 	case failed > 0:
 		outcome = "degraded"
-		reason = fmt.Sprintf("веток: %d, отказали: %d", len(p.Branches), failed)
+		reason = fmt.Sprintf("branches: %d, failed: %d", len(p.Branches), failed)
 	case ran == 0 && len(p.Branches) > 0:
 		outcome = "degraded"
-		reason = fmt.Sprintf("веток: %d, не пошла ни одна — собирать нечего", len(p.Branches))
+		reason = fmt.Sprintf("branches: %d, none ran — nothing to collect", len(p.Branches))
 	}
 	s.trace(step, outcome, reason, len(p.Branches), started)
 	return false, nil
 }
 
-// allowServer держит вызов внутри набора потока.
+// allowServer keeps a call inside the flow's set.
 //
-// Без этой проверки описание обошло бы собственный запрет: поток осознанно
-// убрал из набора источник, который за месяц дал 53 попытки и ни одного
-// успешного чтения, — а прямой вызов дотянулся бы до него в обход. Ограничение,
-// которое можно обойти изнутри, ничего не ограничивает.
+// Without this check a skill would go around its own restriction: the flow
+// deliberately removed from the set a source that produced 53 attempts and not
+// one successful read in a month — and a direct call would reach it anyway. A
+// restriction that can be bypassed from inside restricts nothing.
 func (s *state) allowServer(server string) error {
-	// builtin — не MCP-сервер, а встроенные инструменты самого приложения. Их
-	// радиус задаётся полем builtin_tools скилла и проверяется до исполнения
-	// (линтер W7) плюс раздачей реестра исполнителю: набор потока про них
-	// ничего не знает и знать не должен.
+	// builtin is not an MCP server but the application's own built-in tools.
+	// Their radius is set by the skill's builtin_tools field and checked before
+	// execution (linter W7) plus by handing the registry to the executor: the
+	// flow's set knows nothing about them and should not.
 	if server == BuiltinServer {
 		return nil
 	}
 	if len(s.tools) == 0 {
-		// Пустой набор потока — НЕ «всё разрешено». Симметрично шагу, где
-		// пустой список значит «инструментов не выдавать вовсе»; обратная
-		// трактовка сделала бы скилл без `servers` (поле опционально и в
-		// skill_write, и в схеме) неограниченным — включая write-инструменты.
-		return fmt.Errorf("сервер %q: у потока не объявлено ни одного сервера", server)
+		// An empty flow set is NOT "everything is allowed". Symmetric to a
+		// step, where an empty list means "hand out no tools at all"; the
+		// opposite reading would make a skill without `servers` (the field is
+		// optional both in skill_write and in the schema) unrestricted —
+		// including write tools.
+		return fmt.Errorf("server %q: the flow declares no servers", server)
 	}
 	for _, t := range s.tools {
 		if t == server {
 			return nil
 		}
 	}
-	return fmt.Errorf("сервер %q вне набора потока (%s)", server, strings.Join(s.tools, ", "))
+	return fmt.Errorf("server %q is outside the flow's set (%s)", server, strings.Join(s.tools, ", "))
 }
 
-// toolsFor вычисляет набор инструментов шага: nil → набор потока; заданный —
-// ПЕРЕСЕЧЕНИЕ с набором потока (шаг может только сузить).
+// toolsFor computes a step's tool set: nil → the flow's set; a given one → the
+// INTERSECTION with the flow's set (a step can only narrow).
 //
-// Расширение запрещено намеренно: иначе шаг мог бы вернуть себе инструмент,
-// который поток убрал осознанно, и ограничение перестало бы что-либо значить.
+// Widening is forbidden deliberately: otherwise a step could hand itself back a
+// tool the flow removed on purpose, and the restriction would stop meaning
+// anything.
 func (s *state) toolsFor(run *Run) []string {
 	if run.Tools == nil {
 		return s.tools
 	}
 	want := *run.Tools
 	if len(want) == 0 {
-		return []string{} // шагу инструменты не выдаются вовсе
+		return []string{} // the step gets no tools at all
 	}
 	if len(s.tools) == 0 {
 		return want
@@ -580,11 +596,12 @@ func (s *state) toolsFor(run *Run) []string {
 	return out
 }
 
-// onError применяет политику отказа шага.
+// onError applies the step's failure policy.
 func (s *state) onError(step Step, err error) (bool, error) {
-	// Отказ по правам — самый частый класс в живых скиллах, и реакция на него
-	// всегда одна: сказать честно и продолжить с тем, что есть. Обходные пути и
-	// повторы бессмысленны, права от этого не появятся.
+	// A permission refusal is the most common class in live skills, and the
+	// reaction is always the same: say so honestly and continue with what is
+	// available. Workarounds and retries are pointless, they will not conjure
+	// permissions.
 	policy, saveAs := PolicyAbort, ""
 	switch {
 	case step.Run != nil:
@@ -596,9 +613,10 @@ func (s *state) onError(step Step, err error) (bool, error) {
 	case step.Parallel != nil:
 		policy = step.Parallel.OnError
 	case step.ForEach != nil:
-		// Без этой ветки поле парсилось и молча игнорировалось: цикл падал на
-		// первом же отказе, хотя описание просило пометить элемент и идти
-		// дальше. Ровно тот класс, ради которого из формата выпилили no_retry.
+		// Without this branch the field was parsed and silently ignored: the
+		// loop died on the very first failure even though the skill asked to
+		// mark the item and move on. Exactly the class no_retry was cut from
+		// the format for.
 		policy = step.ForEach.OnError
 	}
 	if policy == "" {
@@ -616,7 +634,7 @@ func (s *state) onError(step Step, err error) (bool, error) {
 		}
 		return true, nil
 	default:
-		return false, fmt.Errorf("шаг %q: %w", stepLabel(step), err)
+		return false, fmt.Errorf("step %q: %w", stepLabel(step), err)
 	}
 }
 
@@ -631,12 +649,12 @@ func stepLabel(step Step) string {
 	if step.Name != "" {
 		return step.Name
 	}
-	return "без имени"
+	return "unnamed"
 }
 
-// noteAnswerWriter запоминает, ЧЕМ записан ответ хода: текстом модели или
-// выводом инструмента. Пишущих в переменную ответа может быть несколько (ветки
-// switch/if), поэтому запоминается последний — он и остаётся ответом.
+// noteAnswerWriter records WHAT wrote the turn's answer: the model's text or a
+// tool's output. There can be several writers to the answer variable (switch/if
+// branches), so the last one is remembered — it is the one that stays.
 func (s *state) noteAnswerWriter(target, kind string) {
 	if target == AnswerVar {
 		s.answeredBy = kind

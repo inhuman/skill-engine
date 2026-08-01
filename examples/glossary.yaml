@@ -1,13 +1,13 @@
-# Перевод глоссария: пройти по списку терминов и перевести каждый.
+# Translating a glossary: walk the list of terms and translate each one.
 #
-# Показывает `for_each`: `in` берёт ИМЯ переменной, а не шаблон `{{...}}` —
-# движок такое отвергает на валидации. Результаты итераций сводятся в
-# `collect`, и шаг ответа работает уже с ними.
+# Shows `for_each`: `in` takes a variable NAME, not a `{{...}}` template — the
+# engine rejects that during validation. The iterations' results are merged into
+# `collect`, and the answering step works with those.
 
-skill_engine_version: "1.0.0"
+skill_engine_version: "2.0.0"
 skill_version: "1.0.0"
 name: glossary
-description: Перевести список терминов, сохранив принятые в отрасли варианты.
+description: Translate a list of terms, keeping the variants established in the industry.
 role: reader
 kind: leaf
 
@@ -15,18 +15,18 @@ workflow:
   assets:
     known:
       kind: text
-      description: устоявшиеся переводы, которые нельзя менять
+      description: settled translations that must not be changed
       content: |
-        commit — коммит (не «фиксация»)
-        merge request — мерж-реквест
-        rollback — откат
-        latency — задержка (не «латентность»)
+        commit — commit (not "revision")
+        merge request — merge request (not "pull request")
+        rollback — rollback (not "reversal")
+        latency — latency (not "lag")
 
   steps:
     - name: split
       instruction: |
-        Список терминов: {{input}}
-        Верни термины по одному в строке, без нумерации и пояснений.
+        The list of terms: {{input}}
+        Return the terms one per line, without numbering or explanations.
       tools: []
       save_as: terms
 
@@ -38,18 +38,19 @@ workflow:
         steps:
           - name: translate
             instruction: |
-              Устоявшиеся переводы:
+              Settled translations:
               {{asset:known}}
 
-              Термин: {{term}}
+              Term: {{term}}
 
-              Дай перевод. Термин есть в списке выше — бери оттуда дословно.
-              Строкой «термин — перевод», без пояснений.
+              Give the translation. If the term is in the list above, take it
+              from there verbatim. One line, "term — translation", no
+              explanations.
             tools: []
             save_as: translated
 
     - name: report
       instruction: |
-        Переводы: {{translated}}
-        Собери их в таблицу «термин | перевод». Ничего не добавляй.
+        The translations: {{translated}}
+        Collect them into a "term | translation" table. Add nothing.
       tools: []
