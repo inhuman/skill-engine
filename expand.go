@@ -61,8 +61,27 @@ func (s *state) expandForArgs(text string) string {
 		return s.asset(assetRe.FindStringSubmatch(m)[1])
 	})
 	return varRe.ReplaceAllStringFunc(text, func(m string) string {
-		return trimHostNote(s.fullValue(s.lookup(varRe.FindStringSubmatch(m)[1])))
+		return s.payload(varRe.FindStringSubmatch(m)[1])
 	})
+}
+
+// payload — a variable as a consumer that is NOT the model must see it: whole,
+// and without the host's note.
+//
+// One resolver per reference, and the ADDRESSEE picks the form. A variable
+// holds what the host would show the MODEL — a preview for a large result, with
+// a "[mem:id]" handle appended — which helps a model and is garbage to a script
+// or a loop. Every consumer used to sort that out for itself, and one of them
+// always forgot: the class fired four times in a day at an embedder, each time
+// somewhere new (a field that would not parse because of the appended note, a
+// loop walking a preview instead of the full list, the note reaching a script's
+// stdin).
+//
+// So there is exactly one way to ask for the data form, and any new consumer
+// has to say which of the two it wants — `expand` for the model, this for
+// everyone else. A guard test keeps it that way.
+func (s *state) payload(name string) string {
+	return trimHostNote(s.fullValue(s.lookup(name)))
 }
 
 // asset returns a payload's content, fetching it on first use.

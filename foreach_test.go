@@ -187,6 +187,46 @@ steps:
 	require.Len(t, r.seen, 4, "walked all four parts, not the one from the preview")
 }
 
+// What a loop COLLECTS goes through the resolver too.
+//
+// A body ending in a `call` with a large result contributes a preview plus its
+// "[mem:id]" note. Joined across iterations those notes sit in the MIDDLE of
+// the string, where trimHostNote can no longer reach them — it cuts the last
+// line — and one handle can no longer stand for three results. Resolving before
+// the join is the only moment it is still fixable.
+//
+// Not a failure anyone has hit yet: it needs a loop body whose last step is a
+// call. That is exactly the kind that turns up on someone else's skill months
+// later, as "half the list went missing".
+func TestForEachCollectResolvesEachIteration(t *testing.T) {
+	f := parseFlow(t, `
+tools: [srv]
+steps:
+  - for_each:
+      in: items
+      as: it
+      collect: found
+      steps:
+        - name: fetch
+          call:
+            tool: "srv:get"
+            args: {id: "{{it}}"}
+            save_as: found
+`)
+	// What the host stores for a large result: a preview plus the handle.
+	c := &recordingCaller{out: "preview…\n[mem:res-1 — this is a PREVIEW, 812kb in total]"}
+	mem := fakeMemory{"res-1": `{"rows":[1,2,3]}`}
+
+	vars, _, err := ExecuteWith(context.Background(), f, Deps{Caller: c, Memory: mem},
+		map[string]string{"items": "a\nb"})
+	require.NoError(t, err)
+
+	assert.NotContains(t, vars["found"], "mem:", "a host note was carried into the collected value")
+	assert.NotContains(t, vars["found"], "PREVIEW")
+	assert.Equal(t, `{"rows":[1,2,3]}`+"\n\n"+`{"rows":[1,2,3]}`, vars["found"],
+		"each iteration must contribute its whole value, not the preview")
+}
+
 // `in` is a variable name, not a template. Written as a template it stays
 // silent: there is no variable named "{{parts}}", the loop makes zero iterations
 // and reports "ok" — an empty walk is indistinguishable from a successful one.

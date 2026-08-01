@@ -23,3 +23,4 @@ parsing is worse than a missing one — it teaches the wrong thing.
 | [`glossary.yaml`](glossary.yaml) | translating terms | `for_each` and `collect`; `in` takes a variable NAME, not a template |
 | [`contract.yaml`](contract.yaml) | checking a contract | `if` + `exit` (wrong document — an honest exit) and an external asset with a `fetch` policy |
 | [`triage.yaml`](triage.yaml) | triaging an incident | a composite skill: branching and delegation |
+| [`audit.yaml`](audit.yaml) | checking a document | `profiles` shared by the classifier steps, and all four `on_empty` outcomes |
