@@ -198,6 +198,10 @@ type Run struct {
 	// "the model usually answers JSON" — an undetectable hole. So the executor
 	// MUST refuse if the path to the step's model does not carry the grammar,
 	// rather than quietly continue.
+	//
+	// For the same reason Model is REQUIRED alongside, and Validate enforces
+	// it: leaving the choice to a default means whichever model the executor
+	// happens to use decides whether the schema applies at all.
 	ResponseSchema map[string]any `yaml:"response_schema,omitempty"`
 }
 
@@ -602,6 +606,22 @@ func validateSteps(steps []Step, path string) error {
 			if s.Run.MaxCalls < 0 {
 				return fmt.Errorf("%s: max_calls is negative", at)
 			}
+		}
+		// A response_schema without a model is a silent hole: the decoding
+		// grammar does not survive every path to a model, and where it is
+		// dropped a "structured answer" degenerates into "the model usually
+		// answers JSON" — parsed by luck, and failing without a trace when the
+		// luck runs out.
+		//
+		// The schema has demanded the pair from the start, but the schema is
+		// only enforced by an embedder who runs a JSON-schema validator; the
+		// engine cannot run one (it would be a dependency). So the rule is
+		// duplicated here on purpose — the one place every embedder passes
+		// through. Checked outside the instruction branch because the schema
+		// attaches it to the STEP: a stray response_schema on a `call` step is
+		// the same hole, minus the model that could have honoured it.
+		if s.Run != nil && len(s.Run.ResponseSchema) > 0 && strings.TrimSpace(s.Run.Model) == "" {
+			return fmt.Errorf("%s: response_schema without model — the decoding grammar is not guaranteed on the default path", at)
 		}
 		if s.Switch != nil {
 			n++

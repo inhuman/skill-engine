@@ -430,6 +430,11 @@ $defs:
           on a subagent's model, where the schema is not applied, and the default
           would silently break parsing.
 
+          The engine enforces the pair as well (`Flow.Validate`), not only this
+          schema: a schema is only enforced by an embedder who runs a validator,
+          and this rule is too expensive to leave to that. A skill that breaks
+          it is refused before the first generation.
+
       sampling:
         $ref: "#/$defs/Sampling"
 
