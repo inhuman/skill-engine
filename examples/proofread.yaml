@@ -1,0 +1,58 @@
+# Proofreading text against a style guide.
+#
+# Shows a REFERENCE asset: it is substituted into the instruction's text
+# ({{asset:style}}), because it is useless unless the model reads it. Compare
+# with expenses.yaml, where code goes by reference PAST the model.
+
+skill_engine_version: "2.0.0"
+skill_version: "1.0.0"
+name: proofread
+description: Find violations of the editorial style guide in a text.
+role: reader
+kind: leaf
+
+workflow:
+  assets:
+    style:
+      kind: text
+      description: the editorial style guide
+      content: |
+        1. No officialese: "is being performed" → "happens".
+        2. Numbers up to ten in words, larger ones in digits.
+        3. No "more better", no "due to the fact that".
+        4. One thought — one sentence.
+
+  steps:
+    - name: check
+      instruction: |
+        The rules:
+        {{asset:style}}
+
+        The text:
+        {{input}}
+
+        Find the violations. For each one: the quote, the rule number, how to
+        rewrite it. If there are no violations, say so — do not invent any.
+      tools: []
+      model: vllm/gemma-4-e4b       # a response_schema without a model choice = a silent hole
+      response_schema:
+        type: object
+        properties:
+          issues:
+            type: array
+            items:
+              type: object
+              properties:
+                quote: {type: string}
+                rule: {type: integer}
+                fix: {type: string, maxLength: 400}
+              required: [quote, rule, fix]
+        required: [issues]
+      save_as: found
+
+    - name: report
+      instruction: |
+        What was found: {{found}}
+
+        Retell it for a human: quote → how to rewrite. Empty — "no violations".
+      tools: []

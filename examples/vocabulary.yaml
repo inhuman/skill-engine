@@ -1,0 +1,80 @@
+# The application's vocabulary: what fills the schema's open slots.
+#
+# The engine interprets none of these values — it passes them to the application
+# as is. Invent your own.
+
+# ── role ──────────────────────────────────────────────────────────────
+# The name of an execution profile. Behind the name the application keeps
+# budgets, timeouts, temperature, reasoning effort.
+roles:
+  reader:       short reads, a small call budget
+  executor:     does the work, has write access
+  investigator: long investigations, a large budget and wall-clock
+
+# ── kind (of a skill) ─────────────────────────────────────────────────
+# The skill's kind — the application decides from it how to present and execute
+# the skill.
+skill_kinds:
+  leaf:      does the work itself
+  composite: breaks the task down into other skills
+
+# ── kind (of an asset) ────────────────────────────────────────────────
+# The payload's kind. It hints at whether the content belongs in the model's
+# context: code and configuration are handed to a tool by reference, a reference
+# book and a template are substituted into the instruction's text.
+asset_kinds: [code, config, text, data]
+
+# ── params (of an asset) ──────────────────────────────────────────────
+# What only makes sense for a SPECIFIC kind. It lives in `params` rather than in
+# separate asset fields: kinds are invented by the application, and a field per
+# kind would mean a schema growing with every foreign kind — while sitting empty
+# on every other asset. The engine does not look in here.
+#
+# So validating these keys is YOUR resolver's job: `langauge: python` passes
+# both the parser and the schema, and only the resolver knows it is a typo.
+asset_params:
+  code:   "lang: python | sql | bash — a reason for a linter to check syntax before production"
+  text:   "format: markdown | plain — whether the markup must survive substitution"
+  data:   "schema: a ref to a field description; encoding: json | csv"
+  config: "applies_to: the name of the service the configuration belongs to"
+
+# ── model ─────────────────────────────────────────────────────────────
+# The name of a step's model. The engine does not interpret it — it passes it to
+# the executor. The examples use `vllm/gemma-4-e4b`; that is a SAMPLE name, not
+# a requirement.
+#
+# Next to a `response_schema` a model is mandatory (the schema requires it): a
+# decoding grammar does not survive every path to the model, and on the default
+# a "structured answer" silently degenerates into "the model usually answers
+# JSON".
+models:
+  vllm/gemma-4-e4b: parsing a request into fields, classification — cheap and structured
+
+# ── source and ref ────────────────────────────────────────────────────
+# Where the content comes from and what an address looks like. Interpreted by
+# the application's resolver — the forms below are merely an example.
+asset_sources:
+  inline:    the content lives in the skill itself (`content`)
+  repo:      "ref: project@branch:path/file.py"
+  storage:   "ref: path/in/storage"
+  service:   "ref: service:method — arguments in `args`"
+
+# ── deliver ───────────────────────────────────────────────────────────
+# Where the output of the tool that consumed the asset goes.
+deliver_routes:
+  reply: the output becomes the turn's answer
+  file:  goes to the user as a file
+  none:  no delivery (the same as leaving it unset)
+
+# ── reasoning ─────────────────────────────────────────────────────────
+# Every vendor has its own scale; a common one is below.
+reasoning_levels: [low, medium, high]
+
+# ── meta ──────────────────────────────────────────────────────────────
+# Arbitrary application data. The engine does not look in here.
+meta_example:
+  schedule:
+    cron: "0 9 * * MON"
+    timezone: Europe/Berlin
+  owner: platform-team
+  tags: [daily, report]

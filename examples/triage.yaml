@@ -1,0 +1,54 @@
+# A composite skill: branching and delegation.
+#
+# Shows how a guard becomes a property of the format: in the "code" branch there
+# is NO call to the ticket system — not because the text asked for that, but
+# because a step with such a call does not exist in that branch.
+
+skill_engine_version: "2.0.0"
+skill_version: "1.0.0"
+name: triage
+description: Triage an error report and file a ticket if one is needed.
+role: investigator
+kind: composite
+
+meta:
+  owner: platform-team
+
+workflow:
+  steps:
+    - name: classify
+      instruction: |
+        The report: {{input}}
+
+        Return code — if the error is in the code, runtime — if it is in the
+        environment.
+      tools: []
+      one_of: [code, runtime]
+      save_as: verdict
+
+    - switch:
+        var: verdict
+        cases:
+          # An error in the code: no ticket needed, an explanation is.
+          code:
+            - name: explain
+              instruction: |
+                An error in the code: {{input}}
+                Explain the cause and what to fix.
+              tools: []
+
+          runtime:
+            - name: evidence
+              delegate:
+                skill: logs
+                task: "gather the logs for the symptom: {{input}}"
+              save_as: logs
+
+            - name: ticket
+              instruction: |
+                The symptom: {{input}}
+                What was gathered: {{logs}}
+
+                File a ticket: a title and a description with facts from what
+                was gathered.
+              tools: [tracker]
