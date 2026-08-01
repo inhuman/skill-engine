@@ -29,6 +29,9 @@ asset_kinds: [code, config, text, data]
 # separate asset fields: kinds are invented by the application, and a field per
 # kind would mean a schema growing with every foreign kind — while sitting empty
 # on every other asset. The engine does not look in here.
+#
+# So validating these keys is YOUR resolver's job: `langauge: python` passes
+# both the parser and the schema, and only the resolver knows it is a typo.
 asset_params:
   code:   "lang: python | sql | bash — a reason for a linter to check syntax before production"
   text:   "format: markdown | plain — whether the markup must survive substitution"

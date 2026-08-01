@@ -26,14 +26,59 @@ type Unmarshal func(data []byte, v any) error
 //go:embed skill.schema.yaml
 var SchemaYAML string
 
-// SchemaSummary — a compact reference for the format: the fields and the first
-// line of each description.
+// SchemaRU — the same contract in Russian.
+//
+// EMBEDDED, not merely present in the repository, and that is the whole point:
+// an embedder shows the schema to whoever writes the skill, and a file that is
+// not embedded does not travel — `go mod vendor` copies only what the build
+// references, so a translation living beside the package would simply not
+// arrive. A field the author cannot read is a field the author does not use.
+//
+// A test keeps this structurally identical to SchemaYAML; only the prose
+// differs, and SchemaYAML stays the source of truth for validation.
+//
+//go:embed skill.schema.ru.yaml
+var SchemaRU string
+
+// SchemaSummary — a compact reference for the format in English: the fields and
+// the first line of each description.
 //
 // The full schema is 56 KB. Handing that to a model means spending context on
 // a reference book: the same kind of suffocation the format protects against
 // by truncating tool results. A skill author needs the list of fields and what
 // each means; the details are in the spec, for humans.
 func SchemaSummary(unmarshal Unmarshal) string {
+	return summarize(SchemaYAML, headingsEN, unmarshal)
+}
+
+// SchemaSummaryRU — the same reference in Russian, for an embedder whose skill
+// authors (and whose skill-writing model) work in Russian.
+//
+// A separate function rather than SchemaSummaryOf(lang string): a language code
+// is a string, and a string can be misspelled into a silent empty result. Two
+// names cannot.
+func SchemaSummaryRU(unmarshal Unmarshal) string {
+	return summarize(SchemaRU, headingsRU, unmarshal)
+}
+
+// schemaHeadings — the summary's own words. They are not taken from the schema
+// (it has no place for them), so a translated summary needs its own set:
+// Russian field descriptions under English headings read as a bug.
+type schemaHeadings struct{ format, step, other string }
+
+var headingsEN = schemaHeadings{
+	format: "SKILL FORMAT (required fields marked *)\n\n",
+	step:   "\nSTEP (exactly one action: instruction | call | set | switch | if | exit | delegate | for_each | parallel)\n\n",
+	other:  "\nOTHER CONSTRUCTS\n\n",
+}
+
+var headingsRU = schemaHeadings{
+	format: "ФОРМАТ СКИЛЛА (обязательные помечены *)\n\n",
+	step:   "\nШАГ (ровно одно действие: instruction | call | set | switch | if | exit | delegate | for_each | parallel)\n\n",
+	other:  "\nОСТАЛЬНЫЕ КОНСТРУКЦИИ\n\n",
+}
+
+func summarize(schema string, h schemaHeadings, unmarshal Unmarshal) string {
 	if unmarshal == nil {
 		return ""
 	}
@@ -54,7 +99,7 @@ func SchemaSummary(unmarshal Unmarshal) string {
 			} `yaml:"properties"`
 		} `yaml:"$defs"`
 	}
-	if err := unmarshal([]byte(SchemaYAML), &root); err != nil {
+	if err := unmarshal([]byte(schema), &root); err != nil {
 		return "" // schema is broken — let the caller hand out the full one
 	}
 
@@ -64,7 +109,7 @@ func SchemaSummary(unmarshal Unmarshal) string {
 	}
 
 	var b strings.Builder
-	b.WriteString("SKILL FORMAT (required fields marked *)\n\n")
+	b.WriteString(h.format)
 	for _, name := range sortedKeys(root.Properties) {
 		p := root.Properties[name]
 		mark := " "
@@ -74,7 +119,7 @@ func SchemaSummary(unmarshal Unmarshal) string {
 		fmt.Fprintf(&b, "%s %-22s %s\n", mark, name, firstLine(p.Description))
 	}
 
-	b.WriteString("\nSTEP (exactly one action: instruction | call | set | switch | if | exit | delegate | for_each | parallel)\n\n")
+	b.WriteString(h.step)
 	if step, ok := root.Defs["Step"]; ok {
 		for _, name := range sortedKeys(step.Properties) {
 			f := step.Properties[name]
@@ -90,7 +135,7 @@ func SchemaSummary(unmarshal Unmarshal) string {
 		}
 	}
 
-	b.WriteString("\nOTHER CONSTRUCTS\n\n")
+	b.WriteString(h.other)
 	for _, name := range sortedKeys(root.Defs) {
 		if name == "Step" {
 			continue

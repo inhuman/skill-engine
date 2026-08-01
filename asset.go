@@ -51,6 +51,14 @@ type Asset struct {
 	//
 	// The engine does not look inside and does not check the shape — it hands
 	// this to the resolver as is.
+	//
+	// Which means VALIDATING THE KEYS IS THE RESOLVER'S JOB, and it is not
+	// optional. An open map buys the format its independence from other
+	// people's kinds at a price: `params: {langauge: python}` passes both the
+	// parser and the schema, where a misspelled `lang` field could not exist at
+	// all. Nobody but the resolver knows which keys are legal for a given kind,
+	// so nobody else can catch that — and unread, a typo means the linter never
+	// checks the syntax and the failure surfaces in production.
 	Params map[string]any `yaml:"params,omitempty"`
 	// Deliver — where the OUTPUT of the tool that consumed the asset goes:
 	// reply — the output becomes the turn's answer; file — delivered as a
