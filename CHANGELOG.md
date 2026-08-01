@@ -21,6 +21,38 @@ wrap skills in something of your own — front matter, a markdown body, several
 documents in one file — unwrap before calling and wrap the result back;
 anything else is refused rather than guessed at.
 
+## 2.1.0
+
+Two optional fields. A skill that does not mention them behaves exactly as it
+did, so nothing needs migrating; a skill that uses one must declare
+`skill_engine_version: 2.1.0`, which is what stops an older engine from reading
+it and quietly ignoring the field.
+
+- **Added**: `profiles` on a workflow and `profile` on a step — a named set of
+  generation parameters (`model`, `sampling`, `tools`, `max_calls`,
+  `max_tool_errors`, `on_error`). A field written on the step wins; `sampling`
+  is replaced whole rather than merged key by key. Measured on a live catalogue
+  of 168 steps: the instructions are nearly all unique while 32 steps carry one
+  identical envelope and 46 another — what repeats is the configuration, not the
+  step. `tools: []` in a profile means an empty set, not "unset", so the guard
+  "do not go to that source" survives being shared.
+
+  Folded into the step before validation, so nothing downstream knows profiles
+  exist — including the `response_schema` rule, which is satisfied by a model
+  inherited from a profile and still refuses a step that ends up without one.
+
+- **Added**: `on_empty` on a step and inside `call` — what an empty result
+  *means*: `continue` (the default, and the old behaviour), `fail` (the step
+  counts as failed, then `on_error` decides), `retry` (`on_empty_retries` more
+  attempts, 1..5, default 1; still empty afterwards is treated as `fail`), and
+  `use` with `on_empty_value`. Emptiness is an empty string after trimming,
+  judged on the value the step *would store*: with `one_of` an ambiguous answer
+  produces text and stores nothing, and it is the stored value that flows on.
+
+  `retry` is refused on a `call` step — a call cannot be repeated, and a
+  repeated call with a side effect is a second ticket, a second merge request,
+  a second e-mail.
+
 ## 2.0.0
 
 Incompatible. Skills on format 1.x need migrating; `Migrate` does all of it.
