@@ -16,6 +16,11 @@ afterwards.
 out, changed, err := skillengine.Migrate(raw)
 ```
 
+The input is a skill file as the format defines it: one YAML document. If you
+wrap skills in something of your own — front matter, a markdown body, several
+documents in one file — unwrap before calling and wrap the result back;
+anything else is refused rather than guessed at.
+
 ## 2.0.0
 
 Incompatible. Skills on format 1.x need migrating; `Migrate` does all of it.

@@ -217,6 +217,81 @@ workflow:
 	})
 }
 
+// Input that is not one YAML document is refused.
+//
+// The failure this prevents looked like success: given a file in front matter
+// the migration inserted the version field ahead of the opening marker, the
+// header stopped being a header, the skill lost its name — and the caller got
+// changed=true with no error. The wrapper belongs to the embedder, so the
+// library refuses instead of learning about it.
+func TestMigrateRefusesMultiDocument(t *testing.T) {
+	for name, src := range map[string]string{
+		"front matter and a markdown body": "---\nname: pods\ndescription: show pods\n---\n\n# Pods\n\nThe body the host wraps around it.\n",
+		"two documents":                    "name: first\ndescription: x\n---\nname: second\ndescription: y\n",
+		"an explicit end marker":           "---\nname: pods\ndescription: x\n...\n",
+		"a separator after content":        "name: pods\ndescription: x\n---\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, changed, err := se.Migrate([]byte(src))
+			require.Error(t, err, "a wrapped file was migrated as if it were a skill")
+			assert.Contains(t, err.Error(), "not a single YAML document")
+			assert.Nil(t, out, "nothing is handed back on a refusal")
+			assert.False(t, changed)
+		})
+	}
+}
+
+// An explicit start of a SINGLE document is ordinary YAML and stays supported —
+// and the inserted version field must land after the marker, not ahead of it,
+// or the migration would create the very second document it refuses to accept.
+func TestMigrateKeepsExplicitDocumentStart(t *testing.T) {
+	out, changed, err := se.Migrate([]byte("---\nname: pods\ndescription: show pods\nplaybook: |\n  do the thing\n"))
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	assert.Equal(t, "---\nskill_engine_version: \"2.0.0\"\nname: pods\ndescription: show pods\nplaybook: |\n  do the thing\n", string(out))
+
+	var doc struct {
+		Version string `yaml:"skill_engine_version"`
+		Name    string `yaml:"name"`
+	}
+	require.NoError(t, yaml.Unmarshal(out, &doc), "the result stopped being one document")
+	assert.Equal(t, "2.0.0", doc.Version)
+	assert.Equal(t, "pods", doc.Name, "the name was lost — the field landed in the wrong document")
+}
+
+// A separator inside a block scalar is part of a script, not a document
+// boundary. Refusing here would reject perfectly good skills: `---` is ordinary
+// text in a heredoc, a markdown template or a YAML-emitting snippet.
+func TestMigrateAllowsSeparatorInsideBlockScalar(t *testing.T) {
+	src := `skill_engine_version: "1.0.0"
+name: emitter
+description: writes yaml
+workflow:
+  assets:
+    tpl:
+      kind: code
+      lang: bash
+      content: |
+        cat <<'EOF'
+        ---
+        a: 1
+        ---
+        b: 2
+        EOF
+  steps:
+    - name: s
+      call: {tool: "srv:run", save_as: out}
+`
+	out, changed, err := se.Migrate([]byte(src))
+	require.NoError(t, err, "a separator inside a script was taken for a document boundary")
+	require.True(t, changed)
+
+	got := string(out)
+	assert.Contains(t, got, "        ---\n        a: 1", "the script was disturbed")
+	assert.Contains(t, got, "      params:\n        lang: bash", "the migration itself did not happen")
+}
+
 // Every example ships on the current major, so migration must be a no-op on
 // them — byte for byte, or the examples are not what the engine actually reads.
 func TestMigrateLeavesCurrentExamplesUntouched(t *testing.T) {
