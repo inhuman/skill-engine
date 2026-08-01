@@ -6,53 +6,56 @@ import (
 	"testing"
 )
 
-// allowedTestDeps — зависимости, разрешённые ТОЛЬКО тестам. У боевого кода их
-// быть не должно ни одной: движок встраивают в чужое приложение, и каждая
-// зависимость здесь становится зависимостью встраивающего — с его версиями и его
-// конфликтами. Разбор YAML движок берёт параметром (тип Unmarshal), сравнение
-// версий реализовано на месте: из semver-библиотеки нужны были три числа.
+// allowedTestDeps — dependencies allowed to TESTS ONLY. Production code must
+// have none at all: the engine is embedded into someone else's application, and
+// every dependency here becomes a dependency of that embedder — with its
+// versions and its conflicts. YAML parsing is taken as a parameter (the
+// Unmarshal type), version comparison is implemented in place: all that was
+// needed from a semver library was three numbers.
 var allowedTestDeps = []string{
 	"gopkg.in/yaml.v3",
 	"github.com/stretchr/testify/assert",
 	"github.com/stretchr/testify/require",
 }
 
-// Библиотека обязана оставаться самостоятельной: формат скиллов и его исполнение
-// не знают про встраивающее приложение. Это не эстетика — на этом держится
-// возможность проверять формат без поднятия половины чужой системы (тесты пакета
-// не трогают ни MCP, ни базу, ни шлюз инференса).
+// The library must stay self-contained: the skill format and its execution know
+// nothing about the embedding application. This is not aesthetics — it is what
+// makes it possible to test the format without standing up half of someone
+// else's system (the package's tests touch neither MCP, nor a database, nor an
+// inference gateway).
 //
-// Связь появляется незаметно: удобный тип из соседнего пакета, «всего одна»
-// константа. Поэтому граница проверяется тестом, а не договорённостью.
+// Coupling appears unnoticed: a convenient type from a neighbouring package,
+// "just one" constant. So the boundary is guarded by a test rather than by an
+// agreement.
 //
-// Проверяются и боевые импорты, и тестовые: тест, потянувший зависимость, делает
-// библиотеку тяжелее ровно так же.
+// Both production and test imports are checked: a test that pulled in a
+// dependency makes the library heavier just the same.
 func TestEngineStaysSelfContained(t *testing.T) {
 	pkg, err := build.ImportDir(".", 0)
 	if err != nil {
-		t.Fatalf("разбор пакета: %v", err)
+		t.Fatalf("parsing the package: %v", err)
 	}
 
-	// Боевой код — только stdlib. Ни одного исключения: как только появится
-	// первое, появится и второе.
+	// Production code — stdlib only. Not a single exception: as soon as the
+	// first one appears, so will the second.
 	for _, imp := range pkg.Imports {
 		if external(imp) {
-			t.Errorf("боевой код импортирует %s — у движка не должно быть зависимостей", imp)
+			t.Errorf("production code imports %s — the engine must have no dependencies", imp)
 		}
 	}
-	// Тестам можно из короткого списка: они в чужую сборку не попадают.
+	// Tests may use the short list: they do not end up in anyone else's build.
 	for _, imports := range [][]string{pkg.TestImports, pkg.XTestImports} {
 		for _, imp := range imports {
 			if external(imp) && !slicesContains(allowedTestDeps, imp) {
-				t.Errorf("тест импортирует %s — зависимость вне объявленного списка", imp)
+				t.Errorf("a test imports %s — a dependency outside the declared list", imp)
 			}
 		}
 	}
 }
 
-// external — импорт не из stdlib (домен в первом сегменте) и не сам движок:
-// тесты из внешнего пакета импортируют его по имени, и это не зависимость, а
-// способ проверять публичный API снаружи.
+// external — an import that is not stdlib (a domain in the first segment) and
+// not the engine itself: tests from the external package import it by name, and
+// that is not a dependency but a way of exercising the public API from outside.
 func external(imp string) bool {
 	if imp == selfModule {
 		return false

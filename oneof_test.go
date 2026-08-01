@@ -6,25 +6,25 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// Нормализация значения шага-классификатора на ЖИВЫХ формулировках.
+// Normalising a classifier step's value on LIVE wordings.
 //
-// Прежняя версия брала последнее вхождение и ошибалась на «Это точно t1, а не
-// foreign» — отрицание в конце фразы обычно для русского, и догадка давала
-// прямо противоположный ответ. Теперь при неоднозначности возвращается пусто:
-// switch уходит в default, где скилл может переспросить, вместо того чтобы
-// молча пойти не туда.
+// The previous version took the last occurrence and got "this is definitely t1,
+// not foreign" wrong — a trailing negation is ordinary phrasing (and the default
+// word order in Russian), so the guess produced the exact opposite answer. Now
+// an ambiguous case returns empty: the switch falls through to default, where
+// the skill can ask again instead of silently going the wrong way.
 func TestNormalizeOneOfOnLiveWordings(t *testing.T) {
 	allowed := []string{"t1", "foreign"}
 	for _, c := range []struct{ text, want, why string }{
-		{"foreign", "foreign", "чистый ответ"},
-		{"  t1\n", "t1", "с пробелами"},
-		{"Итог: определил по префиксу. Результат: foreign", "foreign", "значение после маркера"},
-		{"Ответ: t1", "t1", "маркер «ответ»"},
-		{"Не foreign, а t1", "", "оба упомянуты, маркера нет → неоднозначно"},
-		{"Это точно t1, а не foreign", "", "ЛОВУШКА: последнее вхождение дало бы foreign"},
-		{"Выбираю между t1 и foreign", "", "перечисление без решения"},
-		{"это внутренний ресурс t1, сверяться с репой", "t1", "упомянуто одно значение"},
-		{"ничего не понял", "", "значения нет вовсе"},
+		{"foreign", "foreign", "clean answer"},
+		{"  t1\n", "t1", "with whitespace"},
+		{"Summary: determined by prefix. Result: foreign", "foreign", "value after a marker"},
+		{"Answer: t1", "t1", "the `answer` marker"},
+		{"Not foreign, but t1", "", "both mentioned, no marker → ambiguous"},
+		{"This is definitely t1, not foreign", "", "TRAP: the last occurrence would give foreign"},
+		{"Choosing between t1 and foreign", "", "enumeration without a decision"},
+		{"this is an internal t1 resource, check against the repo", "t1", "one value mentioned"},
+		{"did not understand a thing", "", "no value at all"},
 	} {
 		t.Run(c.why, func(t *testing.T) {
 			assert.Equal(t, c.want, normalizeOneOf(c.text, allowed), c.text)
@@ -32,35 +32,51 @@ func TestNormalizeOneOfOnLiveWordings(t *testing.T) {
 	}
 }
 
-// «Не foreign, а t1» — неоднозначный случай: оба значения названы, маркера нет.
-// Пустой результат честнее догадки.
+// The decision markers are bilingual, and so is the coverage: a model prompted
+// in Russian answers with Russian markers, and dropping them from the list would
+// silently send every such step to default.
+func TestNormalizeOneOfRussianMarkers(t *testing.T) {
+	allowed := []string{"t1", "foreign"}
+	for _, c := range []struct{ text, want, why string }{
+		{"Итог: определил по префиксу. Результат: foreign", "foreign", "value after a marker"},
+		{"Ответ: t1", "t1", "the `ответ` marker"},
+		{"Это точно t1, а не foreign", "", "TRAP: trailing negation"},
+	} {
+		t.Run(c.why, func(t *testing.T) {
+			assert.Equal(t, c.want, normalizeOneOf(c.text, allowed), c.text)
+		})
+	}
+}
+
+// "Not foreign, but t1" is the ambiguous case: both values are named and there
+// is no marker. An empty result is more honest than a guess.
 func TestNormalizeOneOfAmbiguousReturnsEmpty(t *testing.T) {
-	assert.Empty(t, normalizeOneOf("Не foreign, а t1", []string{"t1", "foreign"}))
+	assert.Empty(t, normalizeOneOf("Not foreign, but t1", []string{"t1", "foreign"}))
 }
 
 func TestNormalizeOneOfNoConstraint(t *testing.T) {
-	assert.Equal(t, "любой текст", normalizeOneOf("любой текст", nil))
+	assert.Equal(t, "any text", normalizeOneOf("any text", nil))
 }
 
-// Одно допустимое значение — часть другого (found ⊂ not_found). Простой подсчёт
-// вхождений засчитывал ответ обоим, оба слоя видели ничью и возвращали пустоту:
-// шаг молча оставался без значения. Живой случай: — поисковый скилл.
+// One allowed value is part of another (found ⊂ not_found). A plain occurrence
+// count credited the answer to both, both layers saw a tie and returned nothing:
+// the step silently ended up without a value. Live case: a search skill.
 func TestNormalizeOneOf_OverlappingValues(t *testing.T) {
 	allowed := []string{"found", "not_found"}
 	for _, c := range []struct{ in, want string }{
 		{"not_found", "not_found"},
 		{`"not_found"`, "not_found"},
 		{"found", "found"},
-		{"Ответ: not_found", "not_found"},
-		{"нет подходящих страниц — not_found", "not_found"},
+		{"Answer: not_found", "not_found"},
+		{"no matching pages — not_found", "not_found"},
 	} {
 		if got := normalizeOneOf(c.in, allowed); got != c.want {
-			t.Errorf("normalizeOneOf(%q) = %q, ожидалось %q", c.in, got, c.want)
+			t.Errorf("normalizeOneOf(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
 
-// Кавычки вокруг ответа: модель без грамматики отвечает JSON-строкой.
+// Quotes around the answer: a model without a grammar answers with a JSON string.
 func TestNormalizeOneOf_Quoted(t *testing.T) {
 	allowed := []string{"t1", "foreign"}
 	for _, in := range []string{`"foreign"`, "'foreign'", "`foreign`", ` "foreign" `} {

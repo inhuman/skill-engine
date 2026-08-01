@@ -1,21 +1,21 @@
-// Package skill-engine исполняет декларативное описание скилла: последовательность
-// шагов, у каждого — свой набор инструментов, свой лимит вызовов и своя политика
-// при отказе.
+// Package skillengine executes a declarative skill description: a sequence of
+// steps, each with its own tool set, its own call budget and its own policy on
+// failure.
 //
-// Зачем. Ограничение, записанное словами, модель выполняет вероятностно:
-// замеренный пример — правило «в этот источник не ходи» дало за месяц 53
-// попытки и ни одного успешного чтения. Отсутствие источника в наборе
-// инструментов шага она не выполнить не может.
+// Why. A restriction written in words is followed probabilistically by a model:
+// a measured example — the rule "do not go to this source" produced 53 attempts
+// and not one successful read in a month. The absence of that source from a
+// step's tool set is something it cannot fail to follow.
 //
-// Форма заимствована у AgentSPEX (arXiv 2604.13346, Apache 2.0) — YAML-язык
-// спецификации агентных workflow. Берётся ФОРМА, не код: там Python со своим
-// harness и своей песочницей. Подмножество выбрано по факту: три живых скилла,
-// выписанные в этом синтаксисе, использовали шаги, ветвление и переменные — и
-// ни разу parallel/while/gather.
+// The shape is borrowed from AgentSPEX (arXiv 2604.13346, Apache 2.0), a YAML
+// language for specifying agent workflows. The FORM is taken, not the code:
+// that one is Python with its own harness and its own sandbox. The subset was
+// chosen empirically: three live skills written out in this syntax used steps,
+// branching and variables — and never parallel/while/gather.
 //
-// Пакет пишется ОТЧУЖДАЕМЫМ: домен (инструменты, RBAC, телеметрия) живёт за
-// интерфейсами ниже, внутрь не импортируется ничего специфичного для
-// конкретного агента.
+// The package is written to be DETACHABLE: the domain (tools, RBAC, telemetry)
+// lives behind the interfaces below, and nothing specific to a particular agent
+// is imported inside.
 package skillengine
 
 import (
@@ -25,186 +25,191 @@ import (
 	"strings"
 )
 
-// Flow — разобранное описание: набор шагов, исполняемых по порядку.
+// Flow — a parsed description: the set of steps executed in order.
 type Flow struct {
-	// Steps исполняются последовательно; ветвление — внутри шага (Switch/If).
+	// Steps run sequentially; branching happens inside a step (Switch/If).
 	Steps []Step `yaml:"steps"`
-	// Tools — набор инструментов, доступный всему потоку. Шаг может только
-	// сузить его, не расширить: расширение сделало бы ограничение бессмысленным.
+	// Tools — the tool set available to the whole flow. A step can only narrow
+	// it, never widen it: widening would make the restriction meaningless.
 	Tools []string `yaml:"tools,omitempty"`
-	// Vars — начальные значения переменных потока.
+	// Vars — initial values of the flow's variables.
 	Vars map[string]string `yaml:"vars,omitempty"`
-	// Assets — именованные нагрузки, передаваемые инструментам по ссылке
-	// (см. asset.go). Объявляются в описании скилла, не в шаге: одну и ту же
-	// нагрузку часто потребляют несколько шагов.
+	// Assets — named payloads passed to tools by reference (see asset.go).
+	// Declared in the skill rather than in a step: the same payload is often
+	// consumed by several steps.
 	Assets map[string]Asset `yaml:"assets,omitempty"`
 }
 
-// Step — один шаг. Ровно одно из полей Run/Switch/If/Set должно быть заполнено;
-// это проверяет Validate.
+// Step — a single step. Exactly one of Run/Switch/If/Set must be filled in;
+// Validate checks that.
 type Step struct {
 	Name string `yaml:"name,omitempty"`
 
-	// Run — шаг, выполняемый моделью: инструкция + результат в переменную.
+	// Run — a step performed by the model: an instruction plus a result stored
+	// in a variable.
 	Run *Run `yaml:",inline"`
-	// Switch — ветвление по значению переменной.
+	// Switch — branching on a variable's value.
 	Switch *Switch `yaml:"switch,omitempty"`
-	// If — ветвление по условию.
+	// If — branching on a condition.
 	If *If `yaml:"if,omitempty"`
-	// Set — вычисление переменной без обращения к модели.
+	// Set — computing a variable without involving the model.
 	Set *Set `yaml:"set,omitempty"`
-	// Call — вызов инструмента без обращения к модели.
+	// Call — calling a tool without involving the model.
 	Call *Call `yaml:"call,omitempty"`
-	// Exit — прекратить поток и вернуть ход на прежний путь.
+	// Exit — stop the flow and return the turn to its previous path.
 	Exit *Exit `yaml:"exit,omitempty"`
-	// Delegate — передать работу другому скиллу (см. тип Delegate).
+	// Delegate — hand the work to another skill (see the Delegate type).
 	Delegate *Delegate `yaml:"delegate,omitempty"`
-	// Parallel — несколько независимых веток одновременно (см. тип Parallel).
+	// Parallel — several independent branches at once (see the Parallel type).
 	Parallel *Parallel `yaml:"parallel,omitempty"`
-	// ForEach — повторить шаги для каждого элемента коллекции.
+	// ForEach — repeat steps for every item of a collection.
 	ForEach *ForEach `yaml:"for_each,omitempty"`
 
-	// OnServer — на каком сервере исполняется шаг. Поддерживает {{var}}: имя
-	// вычисляется на исполнении.
+	// OnServer — which server the step runs on. Supports {{var}}: the name is
+	// computed at execution time.
 	//
-	// Для call: адресат вызова; для шага-модели — чьи инструменты ему выдаются.
-	// Зачем: 14 из 28 живых скиллов несут ВАРИАНТЫ одного сервера
-	// (gitlab dev/prod, пять k8s-кластеров, prometheus dev/prod), и без выбора
-	// на исполнении каждый требует switch из 2–5 почти одинаковых веток — тот
-	// самый дубль, который расходится при первой правке.
+	// For call: the address of the call; for a model step: whose tools it is
+	// handed. Why: 14 of 28 live skills carry VARIANTS of one server (gitlab
+	// dev/prod, five k8s clusters, prometheus dev/prod), and without a runtime
+	// choice each needs a switch of 2–5 nearly identical branches — the very
+	// duplication that diverges on the first edit.
 	//
-	// Права не ослабевают: проверяется ПОДСТАВЛЕННОЕ имя, и оно обязано входить
-	// в набор потока.
+	// Permissions are not weakened: the SUBSTITUTED name is checked, and it must
+	// belong to the flow's set.
 	OnServer string `yaml:"on_server,omitempty"`
 
-	// When — условие применимости шага (синтаксис как у If.Cond). Ложно → шаг
-	// пропускается, поток идёт дальше.
+	// When — the step's applicability condition (same syntax as If.Cond). False
+	// → the step is skipped and the flow moves on.
 	//
-	// Зачем отдельно от If: выразимо и ветвлением, но `when` читается как
-	// СВОЙСТВО шага и не растит вложенность там, где ветки нет — есть только
-	// «делать или нет». Живой класс: задача подходит скиллу частично — тогда ход
-	// «иногда даёт нужный ответ, иногда нет», и причина не видна. Пропуск по
-	// условию виден в событиях.
+	// Why separate from If: it is expressible with branching too, but `when`
+	// reads as a PROPERTY of the step and does not grow nesting where there is
+	// no branch — only "do it or not". Live class: the task matches the skill
+	// only partially, and then the turn "sometimes gives the right answer,
+	// sometimes not" with no visible reason. A conditional skip is visible in
+	// the events.
 	When string `yaml:"when,omitempty"`
 }
 
-// Exit — выход из скилла: поток прекращается, ход возвращается на обычный путь.
+// Exit — leaving the skill: the flow stops and the turn returns to its ordinary
+// path.
 //
-// Нужен потому, что шаги исполняются целиком, что бы им ни поручили: у шага нет
-// повода усомниться в том, что скилл выбран верно. Выход делает сомнение
-// выразимым.
+// Needed because steps execute in full whatever they are given: a step has no
+// reason to doubt that the skill was chosen correctly. Exit makes the doubt
+// expressible.
 //
-// Решение — не новый механизм, а новый ТИП ШАГА: классификатор в программе уже
-// есть, ему достаточно значения «не мой случай» и ветки с exit.
+// The solution is not a new mechanism but a new STEP KIND: the program already
+// has a classifier, and all it needs is a "not my case" value and a branch with
+// exit.
 type Exit struct {
-	// Reason — почему вышли. Идёт в событие и в лог: по этим строкам разбирают
-	// промахи роутинга.
+	// Reason — why we left. Goes into the event and the log: these strings are
+	// what routing misses are diagnosed from.
 	Reason string `yaml:"reason,omitempty"`
 }
 
-// Call — прямой вызов инструмента, БЕЗ участия модели.
+// Call — a direct tool call, WITHOUT the model.
 //
-// Зачем. Шаг, исполняемый моделью, стоит две генерации даже когда делать
-// нечего: одну — чтобы решить позвать инструмент, вторую — чтобы пересказать
-// его результат. Замер: 6 генераций на 2 вызова инструментов. При этом
-// сам вызов часто ДЕТЕРМИНИРОВАН — все аргументы уже лежат в переменных потока
-// (их вычислили предыдущие шаги или Set).
+// Why. A step executed by the model costs two generations even when there is
+// nothing to decide: one to decide to call the tool, another to retell its
+// result. Measured: 6 generations for 2 tool calls. Meanwhile the call itself is
+// often DETERMINISTIC — all the arguments already sit in the flow's variables
+// (computed by earlier steps or by Set).
 //
-// Отличие от Run: здесь нет ни инструкции, ни выбора, ни пересказа — результат
-// инструмента попадает в переменную дословно. Заодно исчезает целый класс
-// ошибок «модель позвала инструмент не в том конверте».
+// The difference from Run: there is no instruction, no choice and no retelling
+// — the tool's result lands in the variable verbatim. A whole class of "the
+// model called the tool in the wrong envelope" errors disappears with it.
 //
-// Права НЕ обходятся: вызов идёт тем же путём, что и вызов от модели, и
-// проходит те же проверки. Шаг не может дотянуться до инструмента, который
-// вызывающему не разрешён.
+// Permissions are NOT bypassed: the call goes the same way as a call from the
+// model and passes the same checks. A step cannot reach a tool the caller is
+// not allowed.
 type Call struct {
-	// Tool — какой инструмент звать, в форме "сервер:инструмент".
+	// Tool — which tool to call, in the form "server:tool".
 	Tool string `yaml:"tool"`
-	// Args — аргументы вызова. Значения поддерживают подстановку {{var}};
-	// подставляется ТОЛЬКО в строки, структура остаётся как записана.
+	// Args — the call's arguments. Values support {{var}} substitution; it
+	// applies to strings ONLY, the structure stays as written.
 	Args map[string]any `yaml:"args,omitempty"`
-	// SaveAs — переменная для результата ("" = результат не сохраняется).
+	// SaveAs — the variable for the result ("" = the result is not stored).
 	SaveAs string `yaml:"save_as,omitempty"`
-	// OnError — что делать при отказе. Умолчание — Abort, как у Run.
+	// OnError — what to do on failure. Default is Abort, as for Run.
 	OnError ErrorPolicy `yaml:"on_error,omitempty"`
 }
 
-// Run — шаг, который исполняет модель.
+// Run — a step executed by the model.
 type Run struct {
-	// Instruction — что сделать. Поддерживает подстановку {{var}}.
+	// Instruction — what to do. Supports {{var}} substitution.
 	Instruction string `yaml:"instruction,omitempty"`
-	// SaveAs — имя переменной для результата ("" = результат не сохраняется).
+	// SaveAs — the variable name for the result ("" = the result is not stored).
 	SaveAs string `yaml:"save_as,omitempty"`
 
-	// Tools — инструменты ЭТОГО шага. Пустой непустого потока = шагу инструменты
-	// не выдаются вовсе (шаг обязан ответить из того, что уже собрано).
-	// Отличать «не задано» от «пустой список» позволяет указатель.
+	// Tools — the tools of THIS step. An empty one inside a non-empty flow = the
+	// step is handed no tools at all (it must answer from what is already
+	// gathered). A pointer is what tells "unset" from "empty list".
 	Tools *[]string `yaml:"tools,omitempty"`
 
-	// MaxCalls — потолок обращений к инструментам на этом шаге. Поле шага, а не
-	// потока: в живых скиллах лимиты разные — поиск по коду одна попытка, обход
-	// дерева до восьми.
+	// MaxCalls — the ceiling on tool calls in this step. A step's field, not the
+	// flow's: in live skills the limits differ — one attempt for a code search,
+	// up to eight for walking a tree.
 	//
-	// 0 — НЕ «без ограничения»: исполнитель подставляет свой потолок (у нашего
-	// это 8 генераций). Безлимитного шага в формате нет намеренно — шаг без
-	// потолка возвращает ровно ту проблему, ради которой формат затевался.
+	// 0 is NOT "unlimited": the executor substitutes its own ceiling (8
+	// generations for ours). An unlimited step is deliberately absent from the
+	// format — a step without a ceiling brings back exactly the problem the
+	// format was started for.
 	MaxCalls int `yaml:"max_calls,omitempty"`
 
-	// MaxToolErrors — сколько ПРОМАХОВ модели прощается шагу сверх max_calls.
+	// MaxToolErrors — how many of the model's MISSES are forgiven beyond
+	// max_calls.
 	//
-	// Промах — вызов, отвергнутый инструментом (забыт обязательный аргумент,
-	// битый JSON). Он стоит генерации, поэтому бесплатным быть не может, но и
-	// съедать бюджет ПОЛЕЗНОЙ работы не должен: живой отказ — шаг ревью сжёг все
-	// 6 вызовов на промахах (6 из 7 отвергнуты сервером) и не прочитал ни одного
-	// диффа.
+	// A miss is a call rejected by the tool (a required argument forgotten,
+	// broken JSON). It costs a generation, so it cannot be free, but neither
+	// should it eat the budget of USEFUL work: live failure — a review step
+	// burned all 6 calls on misses (6 of 7 rejected by the server) and read not
+	// a single diff.
 	//
-	// 0 — умолчание исполнителя (2), не «без ограничения»: бесконечные попытки
-	// вернут ровно ту проблему, ради которой формат затевался. Превышение
-	// останавливает шаг с degraded и названной причиной, а не молча.
+	// 0 is the executor's default (2), not "unlimited": endless attempts bring
+	// back exactly the problem the format was started for. Exceeding it stops
+	// the step with degraded and a named reason, not silently.
 	MaxToolErrors int `yaml:"max_tool_errors,omitempty"`
 
-	// OnError — что делать, когда шаг не смог. Умолчание — Abort.
+	// OnError — what to do when the step could not. Default is Abort.
 	OnError ErrorPolicy `yaml:"on_error,omitempty"`
 
-	// OneOf — допустимые значения результата шага. Задано → результат
-	// нормализуется: из ответа берётся то из перечисленных значений, которое в
-	// нём найдено; ничего не найдено — переменная пустеет.
+	// OneOf — the allowed values of the step's result. Set → the result is
+	// normalised: whichever of the listed values is found in the answer is
+	// taken; if none is found, the variable goes empty.
 	//
-	// Зачем. Шаг-классификатор существует ради ветвления, а модель отвечает
-	// связным текстом: на просьбу «ответь одним словом: t1 или foreign» приходит
-	// «Итог: определил тип по префиксу. Результат: foreign» — верно по смыслу и
-	// бесполезно для switch, который сравнивает точно. Живой отказ: ветка не
-	// выбралась, ход ушёл в default.
+	// Why. A classifier step exists for the sake of branching, while a model
+	// answers in prose: asked to "answer in one word: t1 or foreign" it replies
+	// "Summary: determined the type by prefix. Result: foreign" — correct in
+	// meaning and useless to a switch that compares exactly. Live failure: no
+	// branch was chosen and the turn fell through to default.
 	//
-	// Это НЕ проверка формата у модели (просьба, которую она выполняет
-	// вероятностно), а нормализация НА ВЫХОДЕ, в коде.
+	// This is NOT a format check asked of the model (a request it follows
+	// probabilistically) but normalisation ON THE WAY OUT, in code.
 	OneOf []string `yaml:"one_of,omitempty"`
 
-	// Model — модель ЭТОГО шага (пусто = модель по умолчанию у исполнителя).
+	// Model — the model of THIS step (empty = the executor's default).
 	Model string `yaml:"model,omitempty"`
-	// Sampling — параметры генерации шага (см. тип Sampling).
+	// Sampling — the step's generation parameters (see the Sampling type).
 	Sampling *Sampling `yaml:"sampling,omitempty"`
-	// ResponseSchema — схема структурного ответа шага. Результат кладётся в
-	// переменную объектом, поля доступны как {{var.field}}.
+	// ResponseSchema — the schema of the step's structured answer. The result is
+	// stored in the variable as an object, fields reachable as {{var.field}}.
 	//
-	// Осмысленна ТОЛЬКО там, где работает грамматика декодирования: на
-	// пути до модели схема выбрасывается молча, и структурный ответ выродился бы
-	// в «модель обычно отвечает JSON» — необнаруживаемую дыру. Поэтому
-	// исполнитель ОБЯЗАН отказать, если путь к модели шага грамматику не
-	// доносит, а не тихо продолжить.
+	// Meaningful ONLY where decoding grammar works: on the way to the model the
+	// schema is dropped silently, and a structured answer would degenerate into
+	// "the model usually answers JSON" — an undetectable hole. So the executor
+	// MUST refuse if the path to the step's model does not carry the grammar,
+	// rather than quietly continue.
 	ResponseSchema map[string]any `yaml:"response_schema,omitempty"`
 }
 
-// Switch — ветвление по значению переменной.
-// Delegate — передать работу другому скиллу.
+// Delegate — hand the work to another skill.
 //
-// Этим заняты composite-скиллы: разбор инцидента зовёт заведение тикета, скилл поиска —
-// скилл поиска и скилл справки. Без такого шага composite, получивший описание,
-// исполнился бы как обычный поток и потерял бы делегирование целиком, то есть
-// перестал бы делать своё дело.
+// This is what composite skills do: incident triage calls ticket creation, a
+// search skill calls a search skill and a reference skill. Without such a step a
+// composite handed a description would execute as an ordinary flow and lose
+// delegation entirely — that is, stop doing its job.
 //
-// Радиус — радиус ВЫЗВАННОГО скилла: он объявляет свои серверы сам, и
-// делегирование не расширяет доступ вызывающего.
+// The radius is the radius of the CALLED skill: it declares its own servers, and
+// delegation does not widen the caller's access.
 type Delegate struct {
 	Skill   string      `yaml:"skill"`
 	Task    string      `yaml:"task"`
@@ -212,150 +217,158 @@ type Delegate struct {
 	OnError ErrorPolicy `yaml:"on_error,omitempty"`
 }
 
-// Parallel — независимые ветки одновременно: в живых скиллах это параллельный
-// сбор улик из разных источников.
+// Parallel — independent branches at once: in live skills this is gathering
+// evidence from different sources in parallel.
 //
-// Ветки НЕ ВИДЯТ переменных друг друга: иначе результат зависел бы от порядка
-// завершения, а он недетерминирован — формат существует ради обратного.
+// Branches DO NOT SEE each other's variables: otherwise the result would depend
+// on the order of completion, which is non-deterministic — and the format exists
+// for the opposite.
 type Parallel struct {
 	Branches [][]Step    `yaml:"branches"`
 	Collect  string      `yaml:"collect,omitempty"`
 	OnError  ErrorPolicy `yaml:"on_error,omitempty"`
 }
 
-// ForEach — повторить шаги для каждого элемента коллекции.
+// ForEach — repeat steps for every item of a collection.
 //
-// Живые случаи, которые иначе не выражаются: «для КАЖДОГО из 5 сервисов найди
-// репозиторий и коммит», «по каждому сервису релиза из versions.yaml», «по
-// каждому сервису из всех таблиц». Длина списка заранее неизвестна —
-// развернуть в фиксированные шаги нельзя.
+// Live cases that cannot be expressed otherwise: "for EACH of the 5 services
+// find the repository and the commit", "for every service of the release from
+// versions.yaml", "for every service across all the tables". The list's length
+// is not known in advance — it cannot be unrolled into fixed steps.
 type ForEach struct {
-	// In — переменная с коллекцией. Массив (например, из структурного ответа)
-	// итерируется поэлементно; строка — по непустым строкам. Второе покрывает
-	// наблюдаемый случай «список, добытый инструментом».
+	// In — the variable holding the collection. An array (say, from a structured
+	// answer) is iterated element-wise; a string, by its non-empty lines. The
+	// latter covers the observed case of "a list produced by a tool".
 	In string `yaml:"in"`
-	// As — имя переменной элемента внутри тела цикла.
+	// As — the name of the item variable inside the loop body.
 	As    string `yaml:"as"`
 	Steps []Step `yaml:"steps"`
-	// Collect — переменная, куда сводятся результаты итераций.
+	// Collect — the variable the iterations' results are gathered into.
 	Collect string `yaml:"collect,omitempty"`
-	// MaxIterations — потолок. Обязателен ПО СМЫСЛУ, даже когда не задан явно:
-	// цикл по коллекции неизвестной длины — прямой путь к runaway, а сессионный
-	// бюджет остановит его уже после того, как ход сожжён.
+	// MaxIterations — the ceiling. Required IN SPIRIT even when not set
+	// explicitly: a loop over a collection of unknown length is a straight road
+	// to a runaway, and the session budget will stop it only after the turn has
+	// been burned.
 	MaxIterations int         `yaml:"max_iterations,omitempty"`
 	OnError       ErrorPolicy `yaml:"on_error,omitempty"`
 }
 
-// DefaultMaxIterations — потолок цикла, когда описание своего не задало.
+// DefaultMaxIterations — the loop ceiling when the skill did not set its own.
 const DefaultMaxIterations = 10
 
-// SkillDelegate исполняет шаг delegate. Третья (и последняя) точка
-// соприкосновения пакета с внешним миром — рядом с Runner и ToolCaller.
+// SkillDelegate executes a delegate step. The third (and last) point where the
+// package touches the outside world — next to Runner and ToolCaller.
 type SkillDelegate interface {
 	Delegate(ctx context.Context, skill, task string) (string, error)
 }
 
-// Sampling — параметры генерации шага.
+// Sampling — a step's generation parameters.
 //
-// Единица настройки — ШАГ, а не скилл, по той же причине, по которой шагу
-// принадлежат tools и max_calls: у шагов разная работа. Классификатору нужна
-// нулевая температура — он выбирает из двух значений; формулировке ответа
-// человеку нужна теплее, иначе текст деревянный. Один параметр на весь скилл
-// обслуживает оба плохо.
+// The unit of tuning is the STEP, not the skill, for the same reason tools and
+// max_calls belong to a step: steps do different work. A classifier needs zero
+// temperature — it picks between two values; wording an answer for a human needs
+// it warmer, or the text comes out wooden. One parameter for the whole skill
+// serves both badly.
 type Sampling struct {
 	Temperature       *float32 `yaml:"temperature,omitempty"`
 	TopP              *float32 `yaml:"top_p,omitempty"`
 	TopK              *int     `yaml:"top_k,omitempty"`
 	MinP              *float64 `yaml:"min_p,omitempty"`
 	RepetitionPenalty *float64 `yaml:"repetition_penalty,omitempty"`
-	// MaxTokens — потолок выходных токенов ЭТОГО шага. Незадан — действует
-	// глобальный MaxOutputTokens.
+	// MaxTokens — the output-token ceiling of THIS step. Unset — the global
+	// MaxOutputTokens applies.
 	//
-	// Нужен там, где шаг по природе краток, а сорвавшаяся генерация дорога:
-	// два куска ревью выдали 32768 и 22482 токена вместо обычных ~2300,
-	// упёршись в глобальный потолок, и один из них при этом сломал свой же
-	// структурный ответ. Глобальная ручка тут не помощник — она обслуживает
-	// потребителей с разными конвертами.
+	// Needed where a step is short by nature while a runaway generation is
+	// expensive: two chunks of a review produced 32768 and 22482 tokens instead
+	// of the usual ~2300, hitting the global ceiling, and one of them broke its
+	// own structured answer in the process. A global knob is no help here — it
+	// serves consumers with different envelopes.
 	MaxTokens *int `yaml:"max_tokens,omitempty"`
-	// Reasoning — глубина рассуждения (low|medium|high) у моделей, которые её
-	// поддерживают. Задаётся ШАГУ, которому она нужна: замер проекта показал,
-	// что high на роли investigator съедал 83% времени субагентов.
+	// Reasoning — reasoning depth (low|medium|high) on models that support it.
+	// Set on the STEP that needs it: a project measurement showed that high on
+	// the investigator role ate 83% of subagent time.
 	Reasoning string `yaml:"reasoning,omitempty"`
 }
 
+// Switch — branching on a variable's value.
 type Switch struct {
 	Var     string            `yaml:"var"`
 	Cases   map[string][]Step `yaml:"cases"`
 	Default []Step            `yaml:"default,omitempty"`
 }
 
-// If — ветвление по условию вида "var == value" / "var != value".
+// If — branching on a condition of the form "var == value" / "var != value".
 type If struct {
 	Cond string `yaml:"cond"`
 	Then []Step `yaml:"then"`
 	Else []Step `yaml:"else,omitempty"`
 }
 
-// Set — присваивание переменной. Значение поддерживает подстановку {{var}}.
+// Set — assigning a variable. The value supports {{var}} substitution.
 type Set struct {
 	Var   string `yaml:"var"`
 	Value string `yaml:"value"`
 }
 
-// ErrorPolicy — реакция на отказ шага.
+// ErrorPolicy — the reaction to a step's failure.
 //
-// Три класса отказа различаются намеренно: отказ по правам (инструмент есть, но
-// вызывающему не разрешён) требует другого поведения, чем пустой результат.
-// Политика повторялась дословно у трёх разных авторов скиллов — верный признак,
-// что она принадлежит движку, а не описанию.
+// Three classes of failure are told apart deliberately: a permission refusal
+// (the tool exists but the caller is not allowed it) calls for different
+// behaviour than an empty result. The policy was repeated verbatim by three
+// different skill authors — a sure sign it belongs to the engine rather than to
+// the skill.
 type ErrorPolicy string
 
 const (
-	// PolicyAbort — прекратить поток (умолчание).
+	// PolicyAbort — stop the flow (default).
 	PolicyAbort ErrorPolicy = "abort"
-	// PolicyContinue — записать отказ в переменную шага и идти дальше.
-	// Так выражается «нет прав — скажи об этом и продолжай с тем, что есть».
+	// PolicyContinue — record the failure into the step's variable and move on.
+	// This is how "no permission — say so and continue with what is available"
+	// is expressed.
 	PolicyContinue ErrorPolicy = "continue"
-	// PolicySkip — пропустить остаток текущей ветки, не прерывая поток.
+	// PolicySkip — skip the rest of the current branch without aborting the flow.
 	PolicySkip ErrorPolicy = "skip"
 )
 
-// Result — исход шага, попадающий в переменные потока.
+// Result — a step's outcome, as it lands in the flow's variables.
 type Result struct {
 	Text  string
 	Calls int
-	// CallsFailed — сколько из них ОТКАЗАЛИ. Шаг с calls=7 и нулём полезных
-	// результатов внешне неотличим от отработавшего, и разбираться приходится
-	// в логах пода.
+	// CallsFailed — how many of them FAILED. A step with calls=7 and zero useful
+	// results is outwardly indistinguishable from one that worked, and the
+	// digging has to happen in pod logs.
 	CallsFailed int
-	// Note — причина, которую знает ИСПОЛНИТЕЛЬ и не может вывести движок:
-	// «остановлен по превышению промахов» против «упёрся в потолок». Пустая —
-	// движок судит сам. Без неё точная причина тонет в общей «шаг не дал
-	// текста», и чинить приходится вслепую (наступали на этом сами).
+	// Note — the reason the EXECUTOR knows and the engine cannot derive:
+	// "stopped after too many misses" versus "hit the ceiling". Empty — the
+	// engine judges for itself. Without it the precise reason drowns in a generic
+	// "the step produced no text", and fixing happens blind (we stepped on this
+	// ourselves).
 	Note string
-	// Truncated — ответ не дописан: апстрим оборвал генерацию по лимиту токенов.
-	// Отдельно от Note, потому что это МАШИННЫЙ признак: по нему решают, стоит
-	// ли переиграть шаг, а Note — человеческая причина деградации в отчёте.
+	// Truncated — the answer is unfinished: upstream cut the generation off at
+	// the token limit. Separate from Note because it is a MACHINE signal: it is
+	// what a decision to replay the step is based on, while Note is the human
+	// reason for degradation in a report.
 	Truncated bool
 	Err       error
 }
 
-// validateCall проверяет форму вызова до исполнения: имя инструмента должно
-// нести и сервер, и инструмент — иначе адресат вызова неизвестен.
+// validateCall checks a call's shape before execution: the tool name must carry
+// both the server and the tool — otherwise the call has no known address.
 func validateCall(c *Call, at string, serverFromStep bool) error {
 	if serverFromStep {
-		// Сервер задан шагом (on_server) — в tool достаточно имени инструмента.
+		// The server is set by the step (on_server) — the tool name alone is
+		// enough in tool.
 		if strings.TrimSpace(c.Tool) == "" {
-			return fmt.Errorf("%s: call без имени инструмента", at)
+			return fmt.Errorf("%s: call without a tool name", at)
 		}
 		return validateErrPolicy(c.OnError, at)
 	}
 	server, tool, ok := SplitToolRef(c.Tool)
 	if !ok {
-		return fmt.Errorf("%s: call %q: ожидается «сервер:инструмент» (или сервер в on_server)", at, c.Tool)
+		return fmt.Errorf("%s: call %q: want \"server:tool\" (or the server in on_server)", at, c.Tool)
 	}
 	if server == "" || tool == "" {
-		return fmt.Errorf("%s: call %q: пустой сервер или инструмент", at, c.Tool)
+		return fmt.Errorf("%s: call %q: empty server or tool", at, c.Tool)
 	}
 	return validateErrPolicy(c.OnError, at)
 }
@@ -365,12 +378,12 @@ func validateErrPolicy(p ErrorPolicy, at string) error {
 	case "", PolicyAbort, PolicyContinue, PolicySkip:
 		return nil
 	default:
-		return fmt.Errorf("%s: неизвестная on_error %q", at, p)
+		return fmt.Errorf("%s: unknown on_error %q", at, p)
 	}
 }
 
-// SplitToolRef разбирает «сервер:инструмент». Разделитель — ПЕРВОЕ двоеточие:
-// в именах инструментов оно встречается, в именах серверов — нет.
+// SplitToolRef parses "server:tool". The separator is the FIRST colon: tool
+// names contain colons, server names do not.
 func SplitToolRef(ref string) (server, tool string, ok bool) {
 	i := strings.Index(ref, ":")
 	if i < 0 {
@@ -379,61 +392,63 @@ func SplitToolRef(ref string) (server, tool string, ok bool) {
 	return strings.TrimSpace(ref[:i]), strings.TrimSpace(ref[i+1:]), true
 }
 
-// ToolCaller вызывает инструмент напрямую. Вторая (и последняя) точка
-// соприкосновения пакета с внешним миром — рядом с Runner.
+// ToolCaller calls a tool directly. The second (and last) point where the
+// package touches the outside world — next to Runner.
 type ToolCaller interface {
 	CallTool(ctx context.Context, server, tool string, args map[string]any) (string, error)
 }
 
-// MemoryReader отдаёт полный результат инструмента по хендлу рабочей памяти.
+// MemoryReader returns a tool's full result by its working-memory handle.
 //
-// Интерфейс, а не тип хоста: пакет обязан оставаться отчуждаемым, и
-// про рабочую память приложения он знает ровно столько — «по строке-хендлу можно
-// получить строку».
+// An interface rather than the host's type: the package must stay detachable,
+// and all it knows about the application's working memory is exactly this — "a
+// string handle can be turned into a string".
 type MemoryReader interface {
 	Get(id string) (string, bool)
 }
 
-// Runner исполняет один шаг: даёт модели инструкцию, разрешая ровно
-// перечисленные инструменты, и возвращает текст ответа.
+// Runner executes a single step: gives the model an instruction, allowing
+// exactly the listed tools, and returns the answer's text.
 //
-// Это ЕДИНСТВЕННАЯ точка соприкосновения с внешним миром: всё, что знает пакет
-// про модели, инструменты, права и телеметрию, спрятано за этим интерфейсом.
+// This is the ONLY point of contact with the outside world: everything the
+// package knows about models, tools, permissions and telemetry hides behind this
+// interface.
 type Runner interface {
 	Run(ctx context.Context, req StepRequest) (Result, error)
 }
 
-// StepRequest — то, что нужно исполнителю шага.
+// StepRequest — what a step's executor needs.
 type StepRequest struct {
 	Name        string
 	Instruction string
-	// Tools — точный набор разрешённых инструментов. nil = набор потока.
+	// Tools — the exact set of allowed tools. nil = the flow's set.
 	Tools    []string
 	MaxCalls int
-	// MaxToolErrors — сколько промахов модели прощается сверх MaxCalls.
+	// MaxToolErrors — how many of the model's misses are forgiven beyond
+	// MaxCalls.
 	MaxToolErrors int
-	// Model / Sampling — чем и как генерировать шаг. Пусто = умолчания
-	// исполнителя.
+	// Model / Sampling — what to generate the step with and how. Empty = the
+	// executor's defaults.
 	Model          string
 	Sampling       *Sampling
 	ResponseSchema map[string]any
-	// OneOf — допустимые значения результата. Исполнитель, чья модель держит
-	// грамматику декодирования, передаёт их как enum: тогда значение вне списка
-	// становится НЕВОЗМОЖНЫМ, а не исправляется задним числом.
+	// OneOf — the allowed values of the result. An executor whose model holds a
+	// decoding grammar passes them as an enum: then a value outside the list
+	// becomes IMPOSSIBLE rather than corrected after the fact.
 	OneOf []string
 }
 
-// ErrDenied — отказ по правам. Возвращается Runner'ом, чтобы политика могла
-// отличить «не разрешено» от «сломалось»: на первое повторы и обходные пути
-// бессмысленны, на второе — иногда осмысленны.
+// ErrDenied — a permission refusal. Returned by a Runner so the policy can tell
+// "not allowed" from "broke": retries and workarounds are pointless for the
+// former and sometimes sensible for the latter.
 var ErrDenied = errors.New("skill-engine: denied")
 
-// ErrExit — поток прекращён шагом `exit`. НЕ ошибка исполнения: вызывающий
-// обязан отличить её от сбоя, потому что реакция противоположная — не
-// «показать, что собрали», а «этот скилл не подходит, иди обычным путём».
+// ErrExit — the flow was stopped by an `exit` step. NOT an execution error: the
+// caller must tell it from a failure, because the reaction is the opposite — not
+// "show what we gathered" but "this skill does not fit, take the ordinary path".
 var ErrExit = errors.New("skill-engine: exit")
 
-// ExitError несёт причину выхода до вызывающего.
+// ExitError carries the reason for leaving up to the caller.
 type ExitError struct{ Reason string }
 
 func (e *ExitError) Error() string {
@@ -445,20 +460,21 @@ func (e *ExitError) Error() string {
 
 func (e *ExitError) Is(target error) bool { return target == ErrExit }
 
-// ToolRef — инструмент, объявленный описанием.
+// ToolRef — a tool declared by a skill.
 type ToolRef struct {
 	Server string
 	Tool   string
-	// Dynamic — сервер вычисляется на исполнении ({{var}} в on_server), то
-	// есть статически неизвестен: проверять права нужно по всему набору потока.
+	// Dynamic — the server is computed at execution time ({{var}} in on_server),
+	// i.e. it is statically unknown: permissions must be checked against the
+	// flow's whole set.
 	Dynamic bool
 }
 
-// DeclaredTools перечисляет инструменты, которые поток может позвать.
+// DeclaredTools lists the tools the flow may call.
 //
-// Чистая функция над описанием: права проверяет вызывающий, движок про них не
-// знает. Смысл — узнать об отказе ДО первой генерации, а не на середине, когда
-// шаги уже сожжены.
+// A pure function over the description: permissions are checked by the caller,
+// the engine knows nothing of them. The point is to learn about a refusal BEFORE
+// the first generation rather than halfway through, with steps already burned.
 func (f *Flow) DeclaredTools() []ToolRef {
 	var out []ToolRef
 	collectTools(f.Steps, f.Tools, &out)
@@ -483,8 +499,8 @@ func collectTools(steps []Step, flowTools []string, out *[]ToolRef) {
 			}
 			*out = append(*out, ToolRef{Server: server, Tool: tool, Dynamic: dynamic})
 		case s.Run != nil && strings.TrimSpace(s.Run.Instruction) != "":
-			// У шага-модели конкретный инструмент выбирает она сама —
-			// статически известен только СЕРВЕР.
+			// For a model step the specific tool is chosen by the model — only
+			// the SERVER is statically known.
 			servers := flowTools
 			if s.Run.Tools != nil {
 				servers = *s.Run.Tools
@@ -517,11 +533,11 @@ func collectTools(steps []Step, flowTools []string, out *[]ToolRef) {
 	}
 }
 
-// Validate проверяет описание до исполнения: пустой поток, шаг без действия,
-// два действия в одном шаге, ссылка на неизвестную политику.
+// Validate checks a description before execution: an empty flow, a step with no
+// action, two actions in one step, a reference to an unknown policy.
 func (f *Flow) Validate() error {
 	if f == nil || len(f.Steps) == 0 {
-		return fmt.Errorf("skill-engine: пустой поток — нет ни одного шага")
+		return fmt.Errorf("skill-engine: empty flow — not a single step")
 	}
 	if err := normalizeSteps(f.Steps, "steps"); err != nil {
 		return err
@@ -532,14 +548,14 @@ func (f *Flow) Validate() error {
 	return validateSteps(f.Steps, "steps")
 }
 
-// normalizeSteps приводит описание к тому, как его читает исполнение.
+// normalizeSteps brings a description to the shape execution reads it in.
 //
-// Шаг модели объявляет save_as на своём уровне (Run встроен в шаг), а call — у
-// себя внутри. Разница не видна глазом, и автор пишет save_as там же, где
-// привык. Результат молча не сохранялся: следующий шаг получал пустую строку и
-// решал вслепую — живой случай: судья поисковый скилл выносил вердикт по
-// пустому списку. Поэтому save_as, записанный на уровне шага рядом с call,
-// принимается как принадлежащий call.
+// A model step declares save_as at its own level (Run is inlined into the step),
+// while call declares it inside itself. The difference is invisible to the eye,
+// and an author writes save_as where they are used to. The result was silently
+// not stored: the next step got an empty string and decided blind — live case: a
+// judging search skill passed its verdict on an empty list. So a save_as written
+// at step level next to a call is accepted as belonging to the call.
 func normalizeSteps(steps []Step, path string) error {
 	for i := range steps {
 		s := &steps[i]
@@ -550,7 +566,7 @@ func normalizeSteps(steps []Step, path string) error {
 		if s.Run != nil && strings.TrimSpace(s.Run.Instruction) == "" && s.Run.SaveAs != "" {
 			switch {
 			case s.Call != nil && s.Call.SaveAs != "" && s.Call.SaveAs != s.Run.SaveAs:
-				return fmt.Errorf("%s: save_as указан дважды и по-разному (%q у шага, %q внутри call)",
+				return fmt.Errorf("%s: save_as given twice and differently (%q on the step, %q inside call)",
 					at, s.Run.SaveAs, s.Call.SaveAs)
 			case s.Call != nil:
 				s.Call.SaveAs = s.Run.SaveAs
@@ -581,16 +597,16 @@ func validateSteps(steps []Step, path string) error {
 			switch s.Run.OnError {
 			case "", PolicyAbort, PolicyContinue, PolicySkip:
 			default:
-				return fmt.Errorf("%s: неизвестная on_error %q", at, s.Run.OnError)
+				return fmt.Errorf("%s: unknown on_error %q", at, s.Run.OnError)
 			}
 			if s.Run.MaxCalls < 0 {
-				return fmt.Errorf("%s: max_calls отрицательный", at)
+				return fmt.Errorf("%s: max_calls is negative", at)
 			}
 		}
 		if s.Switch != nil {
 			n++
 			if strings.TrimSpace(s.Switch.Var) == "" {
-				return fmt.Errorf("%s: switch без var", at)
+				return fmt.Errorf("%s: switch without var", at)
 			}
 			for k, br := range s.Switch.Cases {
 				if err := validateSteps(br, at+".cases."+k); err != nil {
@@ -616,7 +632,7 @@ func validateSteps(steps []Step, path string) error {
 		if s.Set != nil {
 			n++
 			if strings.TrimSpace(s.Set.Var) == "" {
-				return fmt.Errorf("%s: set без var", at)
+				return fmt.Errorf("%s: set without var", at)
 			}
 		}
 		if s.Call != nil {
@@ -631,10 +647,10 @@ func validateSteps(steps []Step, path string) error {
 		if s.Delegate != nil {
 			n++
 			if strings.TrimSpace(s.Delegate.Skill) == "" {
-				return fmt.Errorf("%s: delegate без skill", at)
+				return fmt.Errorf("%s: delegate without skill", at)
 			}
 			if strings.TrimSpace(s.Delegate.Task) == "" {
-				return fmt.Errorf("%s: delegate без task", at)
+				return fmt.Errorf("%s: delegate without task", at)
 			}
 			if err := validateErrPolicy(s.Delegate.OnError, at); err != nil {
 				return err
@@ -643,22 +659,22 @@ func validateSteps(steps []Step, path string) error {
 		if s.ForEach != nil {
 			n++
 			if strings.TrimSpace(s.ForEach.In) == "" {
-				return fmt.Errorf("%s: for_each без in", at)
+				return fmt.Errorf("%s: for_each without in", at)
 			}
-			// `in` — ИМЯ переменной, а не шаблон. Поле выглядит так, будто примет
-			// «{{parts}}», и молча не примет: движок ищет переменную с таким
-			// именем, не находит, цикл делает НОЛЬ итераций и рапортует «ok».
-			// Отказ на разборе дешевле: пустой обход выглядит как успешный
-			// .
+			// `in` is a variable NAME, not a template. The field looks as though
+			// it would accept "{{parts}}", and silently will not: the engine
+			// looks for a variable with that name, does not find it, the loop
+			// makes ZERO iterations and reports "ok". Refusing at parse time is
+			// cheaper: an empty walk looks like a successful one.
 			if strings.Contains(s.ForEach.In, "{{") {
-				return fmt.Errorf("%s: for_each.in = %q — здесь ИМЯ переменной, без {{ }}",
+				return fmt.Errorf("%s: for_each.in = %q — this is a variable NAME, without {{ }}",
 					at, s.ForEach.In)
 			}
 			if strings.TrimSpace(s.ForEach.As) == "" {
-				return fmt.Errorf("%s: for_each без as", at)
+				return fmt.Errorf("%s: for_each without as", at)
 			}
 			if s.ForEach.MaxIterations < 0 {
-				return fmt.Errorf("%s: max_iterations отрицательный", at)
+				return fmt.Errorf("%s: max_iterations is negative", at)
 			}
 			if err := validateSteps(s.ForEach.Steps, at+".for_each"); err != nil {
 				return err
@@ -670,7 +686,7 @@ func validateSteps(steps []Step, path string) error {
 		if s.Parallel != nil {
 			n++
 			if len(s.Parallel.Branches) < 2 {
-				return fmt.Errorf("%s: parallel меньше чем из двух веток — это обычная последовательность", at)
+				return fmt.Errorf("%s: parallel with fewer than two branches — that is an ordinary sequence", at)
 			}
 			for i, br := range s.Parallel.Branches {
 				if err := validateSteps(br, fmt.Sprintf("%s.branches[%d]", at, i)); err != nil {
@@ -689,18 +705,19 @@ func validateSteps(steps []Step, path string) error {
 		switch n {
 		case 1:
 		case 0:
-			return fmt.Errorf("%s: шаг ничего не делает", at)
+			return fmt.Errorf("%s: step does nothing", at)
 		default:
-			return fmt.Errorf("%s: в одном шаге несколько действий", at)
+			return fmt.Errorf("%s: several actions in one step", at)
 		}
 	}
 	return nil
 }
 
-// Branches отдаёт вложенные наборы шагов: ветки switch/if, тело for_each, ветви
-// parallel. Нужна тем, кто обходит описание целиком — валидаторам и линтеру:
-// иначе каждый заново перечисляет места вложенности и забывает то, что добавили
-// последним (ровно так ветка switch унесла бы опечатку в прод).
+// Branches returns the nested step sets: switch/if branches, the for_each body,
+// parallel branches. Needed by anyone walking a description in full — validators
+// and the linter: otherwise each of them re-enumerates the places nesting can
+// occur and forgets whichever was added last (exactly how a switch branch would
+// carry a typo into production).
 func (s *Step) Branches() [][]Step {
 	var out [][]Step
 	if s.Switch != nil {
@@ -728,24 +745,26 @@ func (s *Step) Branches() [][]Step {
 	return out
 }
 
-// AnswerVar — переменная, из которой берётся ответ хода. Шаг, не назвавший
-// save_as, пишет сюда: не назвать её — обычная форма «это финальный шаг».
+// AnswerVar — the variable the turn's answer is taken from. A step that did not
+// name a save_as writes here: not naming one is the ordinary way of saying "this
+// is the final step".
 const AnswerVar = "answer"
 
-// BuiltinServer — псевдо-сервер для встроенных инструментов встраивающего приложения
-// (`call: {tool: "builtin:run_script"}`).
+// BuiltinServer — the pseudo-server for the embedding application's built-in
+// tools (`call: {tool: "builtin:run_script"}`).
 //
-// Нужен, чтобы детерминированную цепочку можно было выразить шагами `call`, а
-// не поручать модели: цепочка search_tickets → count_per_day → chart_timeseries
-// каждый раз одна и та же, и три модельных вызова ради неё — это три шанса
-// перепутать хендл или аргументы.
+// It exists so that a deterministic chain can be expressed with `call` steps
+// instead of being handed to the model: the chain search_tickets →
+// count_per_day → chart_timeseries is the same every time, and three model calls
+// for it are three chances to mix up a handle or an argument.
 const BuiltinServer = "builtin"
 
-// RunnerFunc и ToolCallerFunc — функции как реализации интерфейсов.
+// RunnerFunc and ToolCallerFunc — functions as implementations of the
+// interfaces.
 //
-// Встраивающему обычно нечего хранить в структуре: исполнить шаг — это позвать
-// свою модель, вызвать инструмент — свой транспорт. Требовать ради этого
-// объявлять тип значит требовать церемонию.
+// An embedder usually has nothing to keep in a struct: executing a step means
+// calling their model, calling a tool means using their transport. Requiring a
+// type declaration for that is requiring ceremony.
 type RunnerFunc func(ctx context.Context, req StepRequest) (Result, error)
 
 func (f RunnerFunc) Run(ctx context.Context, req StepRequest) (Result, error) { return f(ctx, req) }

@@ -1,24 +1,25 @@
-# Примеры
+# Examples
 
-Схема формата (`skill.schema.yaml`) намеренно **не закрывает списки значений** у
-`role`, `kind`, `source`, `deliver`, `reasoning` и формы `ref`: за этими словами
-стоит устройство конкретного приложения, и чужому оно ни к чему.
+The format's schema (`skill.schema.yaml`) deliberately **does not close the
+lists of values** for `role`, `kind`, `source`, `deliver`, `reasoning` or the
+shape of `ref`: behind those words stands the design of a particular
+application, and someone else's is of no use to yours.
 
-Здесь — образцы того, чем эти слоты наполняют, и рабочие скиллы из разных
-областей. Это ПРИМЕРЫ, а не требования: заводите свои значения.
+Here are samples of what those slots get filled with, plus working skills from
+different areas. These are EXAMPLES, not requirements: invent your own values.
 
-Все файлы проверяются тестом (`examples_test.go`): пример, переставший
-разбираться движком, хуже отсутствующего — он учит неверному.
+Every file is checked by a test (`examples_test.go`): an example that stopped
+parsing is worse than a missing one — it teaches the wrong thing.
 
-| файл | о чём | что показывает |
+| file | about | what it shows |
 |---|---|---|
-| [`vocabulary.yaml`](vocabulary.yaml) | словарь значений | чем наполняют открытые слоты схемы |
-| [`pods.yaml`](pods.yaml) | список машин в кластере | разбор запроса → вызов → ответ; сервер вычисляется, но только в пределах набора |
-| [`weather.yaml`](weather.yaml) | погода через браузер | шаг `call` без генерации; браузер достаётся только тому шагу, которому нужен |
-| [`proofread.yaml`](proofread.yaml) | вычитка текста | ассет-справочник ПОДСТАВЛЯЕТСЯ в инструкцию — иначе модель его не прочтёт |
-| [`expenses.yaml`](expenses.yaml) | траты графиком | ассет-код и данные уходят ПО ССЫЛКЕ мимо контекста; `deliver` объявлен заранее |
-| [`inbox.yaml`](inbox.yaml) | разбор письма | `switch` + `delegate`: в ветке «спам» шага ответа клиенту просто нет |
-| [`research.yaml`](research.yaml) | ответ по нескольким источникам | `parallel` и `<collect>.skipped` — «не ходили» отличается от «пусто» |
-| [`glossary.yaml`](glossary.yaml) | перевод терминов | `for_each` и `collect`; `in` берёт ИМЯ переменной, не шаблон |
-| [`contract.yaml`](contract.yaml) | проверка договора | `if` + `exit` (не тот документ — честный выход) и внешний ассет с политикой `fetch` |
-| [`triage.yaml`](triage.yaml) | разбор инцидента | составной скилл: ветвление и делегирование |
+| [`vocabulary.yaml`](vocabulary.yaml) | a vocabulary of values | what the schema's open slots get filled with |
+| [`pods.yaml`](pods.yaml) | listing machines in a cluster | parse the request → call → answer; the server is computed, but only within the declared set |
+| [`weather.yaml`](weather.yaml) | weather through a browser | a `call` step without generation; the browser goes only to the step that needs it |
+| [`proofread.yaml`](proofread.yaml) | proofreading text | a reference asset is SUBSTITUTED into the instruction — otherwise the model never reads it |
+| [`expenses.yaml`](expenses.yaml) | spending as a chart | a code asset and the data go BY REFERENCE past the context; `deliver` is declared in advance |
+| [`inbox.yaml`](inbox.yaml) | triaging an email | `switch` + `delegate`: in the "spam" branch the step that replies to the customer simply is not there |
+| [`research.yaml`](research.yaml) | an answer from several sources | `parallel` and `<collect>.skipped` — "we never went" differs from "it was empty" |
+| [`glossary.yaml`](glossary.yaml) | translating terms | `for_each` and `collect`; `in` takes a variable NAME, not a template |
+| [`contract.yaml`](contract.yaml) | checking a contract | `if` + `exit` (wrong document — an honest exit) and an external asset with a `fetch` policy |
+| [`triage.yaml`](triage.yaml) | triaging an incident | a composite skill: branching and delegation |

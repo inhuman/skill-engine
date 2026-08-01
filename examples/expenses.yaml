@@ -1,16 +1,17 @@
-# Отчёт по тратам: выгрузить, посчитать КОДОМ, нарисовать график, отдать файлом.
+# An expense report: fetch, compute IN CODE, draw a chart, deliver as a file.
 #
-# Показывает три вещи разом:
-#   1. ассет-КОД уходит по ссылке ({from: asset:...}) — через контекст модели он
-#      не проходит, и она его не переписывает;
-#   2. данные тоже передаются по ссылке — `{{rows.mem}}` это хендл рабочей
-#      памяти, а не сам текст: выгрузка на тысячу строк не попадает в промпт;
-#   3. `deliver` объявлен в ассете — маршрут не забудется на последнем шаге.
+# Shows three things at once:
+#   1. a CODE asset goes by reference ({from: asset:...}) — it does not pass
+#      through the model's context, so the model does not rewrite it;
+#   2. the data is passed by reference too — `{{rows.mem}}` is a working-memory
+#      handle, not the text itself: a thousand-row fetch never enters the prompt;
+#   3. `deliver` is declared on the asset — the route will not be forgotten on
+#      the last step.
 
-skill_engine_version: "1.0.0"
+skill_engine_version: "2.0.0"
 skill_version: "1.0.0"
 name: expenses
-description: Показать траты за период графиком по категориям.
+description: Show the spending for a period as a chart by category.
 role: executor
 kind: leaf
 
@@ -22,8 +23,8 @@ workflow:
   assets:
     chart:
       kind: code
-      lang: python
-      description: столбчатая диаграмма трат по категориям
+      params: {lang: python}      # what is meaningful for code lives here, not at the asset's top level
+      description: a bar chart of spending by category
       deliver: file
       content: |
         import json, sys, collections
@@ -40,7 +41,7 @@ workflow:
         values = [totals[n] for n in names]
         plt.figure(figsize=(8, 4))
         plt.bar(names, values)
-        plt.ylabel("сумма")
+        plt.ylabel("amount")
         plt.tight_layout()
         plt.savefig("/tmp/expenses.png")
         print("/tmp/expenses.png")
@@ -48,11 +49,11 @@ workflow:
   steps:
     - name: understand
       instruction: |
-        Запрос: {{input}}
+        Request: {{input}}
 
-        period — период выгрузки словами: «месяц», «квартал», «год».
+        period — the reporting period in words: "month", "quarter", "year".
       tools: []
-      one_of: [месяц, квартал, год]
+      one_of: [month, quarter, year]
       save_as: period
 
     - name: fetch
@@ -63,7 +64,8 @@ workflow:
       on_server: ledger
       save_as: rows
 
-    # Данные едут в скрипт ПО ССЫЛКЕ: модель их не видит и не пересказывает.
+    # The data goes into the script BY REFERENCE: the model neither sees nor
+    # retells it.
     - name: draw
       call:
         tool: run
@@ -77,6 +79,6 @@ workflow:
 
     - name: summary
       instruction: |
-        Траты за {{period}} собраны, график построен и отправлен.
-        Скажи одной фразой, что готово.
+        The spending for the {{period}} has been gathered, the chart built and
+        sent. Say in one phrase that it is done.
       tools: []

@@ -11,14 +11,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// fakeRunner записывает, что именно просили у исполнителя шага, и отдаёт
-// заранее заданные ответы. Ошибки — по имени шага.
+// fakeRunner records what exactly the step executor was asked for and returns
+// preset answers. Failures are keyed by step name.
 type fakeRunner struct {
 	seen   []StepRequest
 	answer map[string]string
 	fail   map[string]error
-	// res — готовый результат для тестов, которым важны счётчики вызовов,
-	// а не текст по имени шага.
+	// res — a ready-made result for tests that care about call counters rather
+	// than about the text keyed by step name.
 	res *Result
 }
 
@@ -41,35 +41,36 @@ func run(t *testing.T, src string, r *fakeRunner) (map[string]string, error) {
 	return v, err
 }
 
-// Главное, ради чего пакет существует: набор инструментов задаётся ШАГОМ, а не
-// просьбой в тексте. Пустой список — не «не задано», а «инструментов нет вовсе».
+// The main thing the package exists for: the tool set is defined by the STEP,
+// not by a request in the text. An empty list is not "unset" but "no tools at
+// all".
 func TestToolsPerStep(t *testing.T) {
 	src := `
 tools: ["search", "read", "tree"]
 steps:
   - name: classify
-    instruction: "определи тип"
+    instruction: "determine the type"
     tools: []
     save_as: kind
   - name: lookup
-    instruction: "найди схему"
+    instruction: "find the schema"
     tools: ["search"]
     save_as: hit
   - name: answer
-    instruction: "ответь по {{hit}}"
+    instruction: "answer using {{hit}}"
 `
-	r := &fakeRunner{answer: map[string]string{"classify": "internal", "lookup": "строка из репы"}}
+	r := &fakeRunner{answer: map[string]string{"classify": "internal", "lookup": "a line from the repo"}}
 	_, err := run(t, src, r)
 	require.NoError(t, err)
 	require.Len(t, r.seen, 3)
 
-	assert.Equal(t, []string{}, r.seen[0].Tools, "шаг классификации обязан идти БЕЗ инструментов")
-	assert.Equal(t, []string{"search"}, r.seen[1].Tools, "шаг сузил набор до одного")
-	assert.Equal(t, []string{"search", "read", "tree"}, r.seen[2].Tools, "шаг не задал — берётся набор потока")
+	assert.Equal(t, []string{}, r.seen[0].Tools, "the classification step must run WITHOUT tools")
+	assert.Equal(t, []string{"search"}, r.seen[1].Tools, "the step narrowed the set to one")
+	assert.Equal(t, []string{"search", "read", "tree"}, r.seen[2].Tools, "the step set none — the flow's set is used")
 }
 
-// Шаг может только СУЗИТЬ набор потока. Иначе ограничение потока ничего не
-// значит: шаг вернул бы себе инструмент, убранный осознанно.
+// A step can only NARROW the flow's set. Otherwise the flow's restriction means
+// nothing: a step would hand itself back a tool that was removed on purpose.
 func TestStepCannotWidenTools(t *testing.T) {
 	src := `
 tools: ["read"]
@@ -81,14 +82,14 @@ steps:
 	r := &fakeRunner{}
 	_, err := run(t, src, r)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"read"}, r.seen[0].Tools, "write/delete отброшены — их нет в потоке")
+	assert.Equal(t, []string{"read"}, r.seen[0].Tools, "write/delete dropped — the flow does not have them")
 }
 
 func TestVarsAndBranching(t *testing.T) {
 	src := `
 steps:
   - name: detect
-    instruction: "чей ресурс"
+    instruction: "whose resource"
     save_as: owner
   - set:
       var: doc
@@ -98,24 +99,24 @@ steps:
       cases:
         internal:
           - name: internal_path
-            instruction: "читай {{doc}}"
+            instruction: "read {{doc}}"
             save_as: out
         foreign:
           - name: foreign_path
-            instruction: "отвечай из знаний"
+            instruction: "answer from knowledge"
             save_as: out
       default:
         - name: unknown_path
-          instruction: "переспроси"
+          instruction: "ask again"
           save_as: out
 `
-	r := &fakeRunner{answer: map[string]string{"detect": "internal", "internal_path": "готово"}}
+	r := &fakeRunner{answer: map[string]string{"detect": "internal", "internal_path": "done"}}
 	vars, err := run(t, src, r)
 	require.NoError(t, err)
 	assert.Equal(t, "docs/internal.md", vars["doc"])
-	assert.Equal(t, "готово", vars["out"])
+	assert.Equal(t, "done", vars["out"])
 	require.Len(t, r.seen, 2)
-	assert.Equal(t, "читай docs/internal.md", r.seen[1].Instruction, "подстановка дошла до инструкции")
+	assert.Equal(t, "read docs/internal.md", r.seen[1].Instruction, "substitution reached the instruction")
 }
 
 func TestSwitchDefault(t *testing.T) {
@@ -132,101 +133,104 @@ steps:
             instruction: "a"
       default:
         - name: fallback
-          instruction: "не разобрал"
+          instruction: "could not tell"
           save_as: out
 `
-	r := &fakeRunner{answer: map[string]string{"detect": "нечто", "fallback": "переспросил"}}
+	r := &fakeRunner{answer: map[string]string{"detect": "something", "fallback": "asked again"}}
 	vars, err := run(t, src, r)
 	require.NoError(t, err)
-	assert.Equal(t, "переспросил", vars["out"])
+	assert.Equal(t, "asked again", vars["out"])
 }
 
-// Каскад фолбэков: пока предыдущий шаг не дал результата — пробуем следующий
-// способ. Так в живых скиллах устроен поиск схемы: поиск → файл по пути → дерево.
+// A cascade of fallbacks: while the previous step gave no result, try the next
+// way. That is how schema lookup works in live skills: search → file by path →
+// tree.
 func TestIfCascade(t *testing.T) {
 	src := `
 steps:
   - name: search
-    instruction: "поиск"
+    instruction: "search"
     save_as: hit
   - if:
       cond: "hit == MISS"
       then:
         - name: by_path
-          instruction: "по пути"
+          instruction: "by path"
           save_as: hit
   - if:
       cond: "hit == MISS"
       then:
         - name: by_tree
-          instruction: "по дереву"
+          instruction: "by tree"
           save_as: hit
 `
-	r := &fakeRunner{answer: map[string]string{"search": "MISS", "by_path": "MISS", "by_tree": "нашлось"}}
+	r := &fakeRunner{answer: map[string]string{"search": "MISS", "by_path": "MISS", "by_tree": "found it"}}
 	vars, err := run(t, src, r)
 	require.NoError(t, err)
-	assert.Equal(t, "нашлось", vars["hit"])
-	assert.Len(t, r.seen, 3, "прошли весь каскад")
+	assert.Equal(t, "found it", vars["hit"])
+	assert.Len(t, r.seen, 3, "walked the whole cascade")
 }
 
-// Пустое значение в условии проверяет незаполненность: «ключ не извлёкся».
+// An empty value in a condition tests for emptiness: "the key was not
+// extracted".
 func TestCondEmptyValue(t *testing.T) {
 	src := `
 steps:
   - name: extract
-    instruction: "извлеки ключ"
+    instruction: "extract the key"
     save_as: key
   - if:
       cond: "key == "
       then:
         - name: ask
-          instruction: "нужен ключ"
+          instruction: "a key is needed"
           save_as: out
 `
-	r := &fakeRunner{answer: map[string]string{"extract": "", "ask": "спросил"}}
+	r := &fakeRunner{answer: map[string]string{"extract": "", "ask": "asked"}}
 	vars, err := run(t, src, r)
 	require.NoError(t, err)
-	assert.Equal(t, "спросил", vars["out"])
+	assert.Equal(t, "asked", vars["out"])
 }
 
-// Отказ по правам — самый частый класс отказа в живых скиллах, и реакция на
-// него всегда одна: сказать честно и продолжить с тем, что есть. Права от
-// повтора не появятся, обходные пути искать нечего.
+// A permission refusal is the most common class of failure in live skills, and
+// the reaction is always the same: say so honestly and continue with what is
+// available. Retrying will not conjure permissions, and there are no workarounds
+// worth looking for.
 func TestOnErrorContinueOnDenied(t *testing.T) {
 	src := `
 steps:
   - name: read_attachment
-    instruction: "прочитай вложение"
+    instruction: "read the attachment"
     save_as: att
     on_error: continue
   - name: answer
-    instruction: "ответь с учётом {{att}}"
+    instruction: "answer taking {{att}} into account"
     save_as: out
 `
 	r := &fakeRunner{
-		fail:   map[string]error{"read_attachment": fmt.Errorf("%w: нет прав на инструмент", ErrDenied)},
-		answer: map[string]string{"answer": "ответил без вложения"},
+		fail:   map[string]error{"read_attachment": fmt.Errorf("%w: no permission for the tool", ErrDenied)},
+		answer: map[string]string{"answer": "answered without the attachment"},
 	}
 	vars, err := run(t, src, r)
-	require.NoError(t, err, "отказ по правам не должен ронять поток")
+	require.NoError(t, err, "a permission refusal must not bring the flow down")
 	assert.Contains(t, vars["att"], "DENIED")
-	assert.Equal(t, "ответил без вложения", vars["out"])
-	assert.Contains(t, r.seen[1].Instruction, "DENIED", "следующий шаг ВИДИТ, что доступа не было")
+	assert.Equal(t, "answered without the attachment", vars["out"])
+	assert.Contains(t, r.seen[1].Instruction, "DENIED", "the next step SEES that there was no access")
 }
 
 func TestOnErrorAbortIsDefault(t *testing.T) {
 	src := `
 steps:
   - name: must_work
-    instruction: "обязательный шаг"
+    instruction: "a required step"
   - name: never
-    instruction: "не должен выполниться"
+    instruction: "must not run"
 `
-	r := &fakeRunner{fail: map[string]error{"must_work": errors.New("сломалось")}}
+	r := &fakeRunner{fail: map[string]error{"must_work": errors.New("broke")}}
 	_, err := run(t, src, r)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "must_work")
-	assert.Len(t, r.seen, 1, "поток прерван, второй шаг не запускался")
+	assert.Len(t, r.seen, 1, "the flow aborted, the second step never started")
 }
 
 func TestOnErrorSkipStopsBranchOnly(t *testing.T) {
@@ -236,24 +240,24 @@ steps:
       cond: "x == "
       then:
         - name: optional
-          instruction: "необязательный"
+          instruction: "optional"
           save_as: o
           on_error: skip
         - name: after_in_branch
-          instruction: "внутри ветки после отказа"
+          instruction: "inside the branch, after the failure"
   - name: after_branch
-    instruction: "снаружи ветки"
+    instruction: "outside the branch"
     save_as: out
 `
 	r := &fakeRunner{
-		fail:   map[string]error{"optional": errors.New("не вышло")},
-		answer: map[string]string{"after_branch": "дошли"},
+		fail:   map[string]error{"optional": errors.New("did not work out")},
+		answer: map[string]string{"after_branch": "got here"},
 	}
 	vars, err := run(t, src, r)
 	require.NoError(t, err)
-	assert.Equal(t, "дошли", vars["out"], "поток продолжился после прерванной ветки")
+	assert.Equal(t, "got here", vars["out"], "the flow continued after the aborted branch")
 	for _, s := range r.seen {
-		assert.NotEqual(t, "after_in_branch", s.Name, "остаток ветки пропущен")
+		assert.NotEqual(t, "after_in_branch", s.Name, "the rest of the branch was skipped")
 	}
 }
 
@@ -261,10 +265,10 @@ func TestLimitsReachRunner(t *testing.T) {
 	src := `
 steps:
   - name: flaky_search
-    instruction: "поиск"
+    instruction: "search"
     max_calls: 1
   - name: tree_walk
-    instruction: "дерево"
+    instruction: "tree"
     max_calls: 8
 `
 	r := &fakeRunner{}
@@ -274,28 +278,28 @@ steps:
 	assert.Equal(t, 8, r.seen[1].MaxCalls)
 }
 
-// Неизвестная переменная превращается в пустую строку. Оставленный маркер
-// {{var}} доехал бы до модели и читался ею как часть инструкции.
+// An unknown variable turns into an empty string. A leftover {{var}} marker
+// would reach the model and read to it as part of the instruction.
 func TestUnknownVarBecomesEmpty(t *testing.T) {
 	src := `
 steps:
   - name: s
-    instruction: "работай с [{{nothing}}]"
+    instruction: "work with [{{nothing}}]"
 `
 	r := &fakeRunner{}
 	_, err := run(t, src, r)
 	require.NoError(t, err)
-	assert.Equal(t, "работай с []", r.seen[0].Instruction)
+	assert.Equal(t, "work with []", r.seen[0].Instruction)
 }
 
 func TestValidate(t *testing.T) {
 	bad := map[string]string{
-		"пустой поток":         `steps: []`,
-		"шаг без действия":     "steps:\n  - name: x",
-		"switch без var":       "steps:\n  - switch:\n      cases: {}",
-		"кривое условие":       "steps:\n  - if:\n      cond: \"a > b\"\n      then: []",
-		"неизвестная политика": "steps:\n  - instruction: x\n    on_error: retry",
-		"отрицательный лимит":  "steps:\n  - instruction: x\n    max_calls: -1",
+		"empty flow":          `steps: []`,
+		"step with no action": "steps:\n  - name: x",
+		"switch without var":  "steps:\n  - switch:\n      cases: {}",
+		"malformed condition": "steps:\n  - if:\n      cond: \"a > b\"\n      then: []",
+		"unknown policy":      "steps:\n  - instruction: x\n    on_error: retry",
+		"negative limit":      "steps:\n  - instruction: x\n    max_calls: -1",
 	}
 	for name, src := range bad {
 		t.Run(name, func(t *testing.T) {
@@ -305,22 +309,22 @@ func TestValidate(t *testing.T) {
 		})
 	}
 
-	t.Run("валидный проходит", func(t *testing.T) {
+	t.Run("a valid one passes", func(t *testing.T) {
 		var f Flow
 		require.NoError(t, yaml.Unmarshal([]byte("steps:\n  - instruction: x\n    on_error: continue"), &f))
 		assert.NoError(t, f.Validate())
 	})
 }
 
-// Шаг-классификатор существует ради ветвления, а модель отвечает связным текстом.
-// Живой случай: на «ответь одним словом: t1 или foreign» пришло
-// «Итог: Определил тип ресурса по префиксу. Результат: foreign» — верно по
-// смыслу, но switch сравнивает точно, и ветка не выбралась.
+// A classifier step exists for the sake of branching, while a model answers in
+// prose. Live case: "answer in one word: t1 or foreign" got back "Summary:
+// determined the resource type by prefix. Result: foreign" — correct in meaning,
+// but a switch compares exactly and no branch was chosen.
 func TestOneOfNormalizesVerboseAnswer(t *testing.T) {
 	src := `
 steps:
   - name: classify
-    instruction: "определи тип"
+    instruction: "determine the type"
     one_of: ["t1", "foreign"]
     save_as: owner
   - switch:
@@ -328,59 +332,59 @@ steps:
       cases:
         foreign:
           - name: public_answer
-            instruction: "ответь из знаний"
+            instruction: "answer from knowledge"
             save_as: out
         t1:
           - name: internal_answer
-            instruction: "сверься со схемой"
+            instruction: "check against the schema"
             save_as: out
       default:
         - name: ask
-          instruction: "переспроси"
+          instruction: "ask again"
           save_as: out
 `
 	r := &fakeRunner{answer: map[string]string{
-		"classify":      "Итог: Определил тип ресурса по префиксу. Результат: foreign",
-		"public_answer": "ответил",
+		"classify":      "Summary: determined the resource type by prefix. Result: foreign",
+		"public_answer": "answered",
 	}}
 	vars, err := run(t, src, r)
 	require.NoError(t, err)
-	assert.Equal(t, "foreign", vars["owner"], "ответ сведён к допустимому значению")
-	assert.Equal(t, "ответил", vars["out"], "ветка выбрана верно")
+	assert.Equal(t, "foreign", vars["owner"], "the answer was reduced to an allowed value")
+	assert.Equal(t, "answered", vars["out"], "the right branch was chosen")
 }
 
 func TestNormalizeOneOf(t *testing.T) {
 	allowed := []string{"t1", "foreign"}
-	// Перечисление вариантов перед выбором: берётся ПОСЛЕДНЕЕ вхождение.
+	// Options enumerated before the choice: the LAST occurrence is taken.
 	assert.Equal(t, "foreign",
-		normalizeOneOf("нужно определить t1 или foreign; здесь foreign", allowed))
+		normalizeOneOf("we must decide between t1 and foreign; this one is foreign", allowed))
 	assert.Equal(t, "t1", normalizeOneOf("t1", allowed))
-	assert.Equal(t, "foreign", normalizeOneOf("FOREIGN", allowed), "регистр не важен")
-	assert.Empty(t, normalizeOneOf("не смог определить", allowed), "ничего не найдено — пусто")
-	assert.Equal(t, "как есть", normalizeOneOf("как есть", nil), "без one_of текст не трогаем")
+	assert.Equal(t, "foreign", normalizeOneOf("FOREIGN", allowed), "case does not matter")
+	assert.Empty(t, normalizeOneOf("could not determine", allowed), "nothing found — empty")
+	assert.Equal(t, "as is", normalizeOneOf("as is", nil), "without one_of the text is left alone")
 }
 
-// Шаг без save_as — финальный ответ, а не выброшенная работа: его текст обязан
-// доехать до вызывающего. Прежде он не сохранялся никуда, и ход отдавал самую
-// длинную служебную переменную — разбор первого шага вместо ответа.
+// A step without save_as is the final answer, not discarded work: its text must
+// reach the caller. It used to be stored nowhere, and the turn handed out the
+// longest internal variable — the first step's parse instead of an answer.
 func TestStepWithoutSaveAsFillsAnswer(t *testing.T) {
 	out, err := run(t, `
 steps:
   - name: parse
-    instruction: разбери
+    instruction: parse it
     tools: []
     save_as: req
   - name: reply
-    instruction: ответь
+    instruction: answer
     tools: []
-`, &fakeRunner{answer: map[string]string{"parse": "служебное значение подлиннее", "reply": "вот ответ"}})
+`, &fakeRunner{answer: map[string]string{"parse": "a longer internal value", "reply": "here is the answer"}})
 	require.NoError(t, err)
-	assert.Equal(t, "вот ответ", out[AnswerVar])
+	assert.Equal(t, "here is the answer", out[AnswerVar])
 }
 
-// Ни одна ветка не подошла, а default пуст — это провал ветвления, а не «нечего
-// делать»: работа шага не сделана. В следе такой шаг обязан быть отмечен
-// деградацией, иначе тихий отказ выглядит успехом.
+// No branch matched and the default is empty — that is a failed branch, not
+// "nothing to do": the step's work was not done. In the trace such a step must
+// be marked as degraded, otherwise a silent failure looks like success.
 func TestSwitchWithoutMatchAndEmptyDefaultIsLoud(t *testing.T) {
 	var f Flow
 	require.NoError(t, yaml.Unmarshal([]byte(`
@@ -404,19 +408,20 @@ steps:
 			sw = &outcome.Steps[i]
 		}
 	}
-	require.NotNil(t, sw, "шага switch нет в следе")
-	assert.Equal(t, "degraded", sw.Outcome, "тихий отказ ветвления")
-	assert.Contains(t, sw.Reason, "ни одна ветка не подошла")
+	require.NotNil(t, sw, "the switch step is missing from the trace")
+	assert.Equal(t, "degraded", sw.Outcome, "a silent branching failure")
+	assert.Contains(t, sw.Reason, "no branch matched")
 }
 
-// Шаг, не давший ни слова, — отказ, а не успех: его работа не сделана. Класс
-// живой — gpt-oss кладёт ответ в reasoning_content, оставляя content пустым.
+// A step that gave not a single word is a failure, not a success: its work was
+// not done. The class is live — gpt-oss puts the answer into reasoning_content
+// and leaves content empty.
 func TestStepWithoutTextIsDegraded(t *testing.T) {
 	var f Flow
 	require.NoError(t, yaml.Unmarshal([]byte(`
 steps:
   - name: mute
-    instruction: ответь
+    instruction: answer
     tools: []
 `), &f))
 
@@ -424,12 +429,12 @@ steps:
 	require.NoError(t, err)
 	require.Len(t, outcome.Steps, 1)
 	assert.Equal(t, "degraded", outcome.Steps[0].Outcome)
-	assert.Contains(t, outcome.Steps[0].Reason, "не дал текста")
+	assert.Contains(t, outcome.Steps[0].Reason, "produced no text")
 }
 
-// Делегирование — спавн субагента, самая дорогая операция хода. Без следа оно
-// невидимо и в agent_events, и в прогресс-посте: человек смотрит на «думаю…»,
-// пока минуту работает другой скилл.
+// Delegation spawns a subagent — the most expensive operation of a turn. Without
+// a trace it is invisible in both agent_events and the progress post: a human
+// stares at "thinking…" while another skill works for a minute.
 func TestDelegateIsTraced(t *testing.T) {
 	var f Flow
 	require.NoError(t, yaml.Unmarshal([]byte(`
@@ -437,21 +442,21 @@ steps:
   - name: ask_other
     delegate:
       skill: ticket
-      task: разбери тикет
+      task: analyse the ticket
       save_as: out
 `), &f))
 
-	_, outcome, err := ExecuteWith(t.Context(), &f, Deps{Delegate: constDelegate("готово")}, nil)
+	_, outcome, err := ExecuteWith(t.Context(), &f, Deps{Delegate: constDelegate("done")}, nil)
 	require.NoError(t, err)
 
-	require.Len(t, outcome.Steps, 1, "делегирование не оставило следа")
+	require.Len(t, outcome.Steps, 1, "delegation left no trace")
 	assert.Equal(t, "delegate", outcome.Steps[0].Kind)
 	assert.Equal(t, "ok", outcome.Steps[0].Outcome)
-	assert.Contains(t, outcome.Steps[0].Reason, "ticket", "в следе не видно, какому скиллу отдали работу")
+	assert.Contains(t, outcome.Steps[0].Reason, "ticket", "the trace does not show which skill got the work")
 }
 
-// Отказ делегата тоже обязан быть в следе: под политикой continue он иначе
-// неотличим от успеха, а работа не сделана.
+// A delegate's failure must be in the trace too: under the continue policy it is
+// otherwise indistinguishable from success, while the work was not done.
 func TestDelegateFailureIsTraced(t *testing.T) {
 	var f Flow
 	require.NoError(t, yaml.Unmarshal([]byte(`
@@ -459,7 +464,7 @@ steps:
   - name: ask_other
     delegate:
       skill: ticket
-      task: разбери тикет
+      task: analyse the ticket
       save_as: out
       on_error: continue
 `), &f))
@@ -470,8 +475,9 @@ steps:
 	assert.NotEqual(t, "ok", outcome.Steps[0].Outcome)
 }
 
-// Развилка отмечает границу: сколько веток пошло и сколько отказало. Иначе
-// отказавшая под continue ветка неотличима от не запускавшейся.
+// A fork marks the boundary: how many branches went and how many failed.
+// Otherwise a branch that failed under continue is indistinguishable from one
+// that never started.
 func TestParallelIsTraced(t *testing.T) {
 	var f Flow
 	require.NoError(t, yaml.Unmarshal([]byte(`
@@ -487,7 +493,7 @@ steps:
             delegate: {skill: two, task: t, save_as: y}
 `), &f))
 
-	_, outcome, err := ExecuteWith(t.Context(), &f, Deps{Delegate: constDelegate("готово")}, nil)
+	_, outcome, err := ExecuteWith(t.Context(), &f, Deps{Delegate: constDelegate("done")}, nil)
 	require.NoError(t, err)
 
 	var par *StepTrace
@@ -496,8 +502,8 @@ steps:
 			par = &outcome.Steps[i]
 		}
 	}
-	require.NotNil(t, par, "развилка не оставила следа")
-	assert.Contains(t, par.Reason, "веток: 2")
+	require.NotNil(t, par, "the fork left no trace")
+	assert.Contains(t, par.Reason, "branches: 2")
 }
 
 type constDelegate string
@@ -509,12 +515,12 @@ func (c constDelegate) Delegate(context.Context, string, string) (string, error)
 type failingDelegate struct{}
 
 func (failingDelegate) Delegate(context.Context, string, string) (string, error) {
-	return "", errors.New("субагент упал")
+	return "", errors.New("the subagent fell over")
 }
 
-// Развилка, где по условию пропущены ВСЕ ветки, ничего не собрала. Следующий
-// шаг всё равно сформулирует ответ, и он будет выглядеть законченным — поэтому
-// такая развилка обязана быть отмечена деградацией.
+// A fork where ALL branches were skipped by condition gathered nothing. The next
+// step will word an answer anyway and it will look complete — so such a fork must
+// be marked as degraded.
 func TestParallelAllBranchesSkippedIsDegraded(t *testing.T) {
 	var f Flow
 	require.NoError(t, yaml.Unmarshal([]byte(`
@@ -531,7 +537,7 @@ steps:
             delegate: {skill: two, task: t, save_as: y}
 `), &f))
 
-	_, outcome, err := ExecuteWith(t.Context(), &f, Deps{Delegate: constDelegate("данные")},
+	_, outcome, err := ExecuteWith(t.Context(), &f, Deps{Delegate: constDelegate("data")},
 		map[string]string{"pick": `{"wiki":false,"kg":false}`})
 	require.NoError(t, err)
 
@@ -542,12 +548,12 @@ steps:
 		}
 	}
 	require.NotNil(t, par)
-	assert.Equal(t, "degraded", par.Outcome, "все ветки пропущены, а развилка числится успешной")
-	assert.Contains(t, par.Reason, "ни одна")
+	assert.Equal(t, "degraded", par.Outcome, "all branches skipped, yet the fork counts as successful")
+	assert.Contains(t, par.Reason, "none ran")
 }
 
-// Хоть одна ветка пошла — развилка успешна: частичный сбор это нормальный
-// результат, а не отказ.
+// At least one branch went — the fork is successful: a partial gather is a
+// normal result, not a failure.
 func TestParallelPartialSelectionIsOK(t *testing.T) {
 	var f Flow
 	require.NoError(t, yaml.Unmarshal([]byte(`
@@ -564,20 +570,20 @@ steps:
             delegate: {skill: two, task: t, save_as: y}
 `), &f))
 
-	_, outcome, err := ExecuteWith(t.Context(), &f, Deps{Delegate: constDelegate("данные")},
+	_, outcome, err := ExecuteWith(t.Context(), &f, Deps{Delegate: constDelegate("data")},
 		map[string]string{"pick": `{"wiki":true,"kg":false}`})
 	require.NoError(t, err)
 
 	for _, s := range outcome.Steps {
 		if s.Kind == "parallel" {
-			assert.Equal(t, "ok", s.Outcome, "частичный сбор — не отказ")
+			assert.Equal(t, "ok", s.Outcome, "a partial gather is not a failure")
 		}
 	}
 }
 
-// Пропущенные ветки доезжают до шага, формулирующего ответ. Без этого он видит
-// только собранное и выдаёт «источник ответил пусто» там, где в источник не
-// ходили вовсе — то есть непроверенное за проверенное.
+// Skipped branches reach the step that words the answer. Without them it sees
+// only what was gathered and reports "the source answered nothing" where the
+// source was never visited — passing off the unchecked as checked.
 func TestParallelExposesSkippedBranches(t *testing.T) {
 	var f Flow
 	require.NoError(t, yaml.Unmarshal([]byte(`
@@ -588,35 +594,36 @@ steps:
       branches:
         - - name: probe_wiki
             when: pick.wiki == true
-            delegate: {skill: поисковый скилл, task: t, save_as: from_wiki}
+            delegate: {skill: wiki-search, task: t, save_as: from_wiki}
         - - name: probe_tracker
             when: pick.tracker == true
             delegate: {skill: ticket, task: t, save_as: from_tracker}
 `), &f))
 
-	vars, _, err := ExecuteWith(t.Context(), &f, Deps{Delegate: constDelegate("данные вики")},
+	vars, _, err := ExecuteWith(t.Context(), &f, Deps{Delegate: constDelegate("wiki data")},
 		map[string]string{"pick": `{"wiki":true,"tracker":false}`})
 	require.NoError(t, err)
 
-	assert.Contains(t, vars["findings"], "данные вики")
+	assert.Contains(t, vars["findings"], "wiki data")
 	assert.Contains(t, vars["findings"+SkippedSuffix], "probe_tracker",
-		"пропущенная ветка не видна следующему шагу")
+		"the skipped branch is invisible to the next step")
 	assert.NotContains(t, vars["findings"+SkippedSuffix], "probe_wiki")
 }
 
-// Шаг, у которого ОТКАЗАЛИ все вызовы, обязан быть degraded, а не ok.
+// A step whose calls ALL failed must be degraded, not ok.
 //
-// Живой случай: шаг ревью сделал 7 вызовов, сервер отверг все
-// («Either mergeRequestIid or branchName must be provided»), шаг упёрся в
-// потолок и отдал пустоту — а событие писало outcome=ok, calls=7. По событиям
-// ход был неотличим от успешного, и разбираться пришлось в логах пода.
+// Live case: a review step made 7 calls, the server rejected every one ("Either
+// mergeRequestIid or branchName must be provided"), the step hit the ceiling and
+// returned nothing — while the event recorded outcome=ok, calls=7. By the events
+// the turn was indistinguishable from a successful one, and the digging had to
+// happen in pod logs.
 func TestAllCallsFailedIsDegraded(t *testing.T) {
-	r := &fakeRunner{res: &Result{Text: "что-то модель всё же сказала", Calls: 7, CallsFailed: 7}}
+	r := &fakeRunner{res: &Result{Text: "the model said something anyway", Calls: 7, CallsFailed: 7}}
 	f := parseFlow(t, `
 tools: ["repo-dev"]
 steps:
   - name: judge
-    instruction: "разбери MR"
+    instruction: "review the MR"
     save_as: out
 `)
 	_, outcome, err := ExecuteWith(context.Background(), f, Deps{Runner: r}, nil)
@@ -625,36 +632,36 @@ steps:
 	tr := outcome.Steps[0]
 	assert.Equal(t, "degraded", tr.Outcome)
 	assert.Equal(t, 7, tr.CallsFailed)
-	assert.Contains(t, tr.Reason, "все вызовы инструментов отказали")
+	assert.Contains(t, tr.Reason, "all tool calls failed")
 }
 
-// Частичный отказ — это НЕ провал шага: полезный результат получен.
+// A partial failure is NOT a failed step: a useful result was obtained.
 func TestSomeCallsFailedStaysOK(t *testing.T) {
-	r := &fakeRunner{res: &Result{Text: "разбор готов", Calls: 5, CallsFailed: 2}}
+	r := &fakeRunner{res: &Result{Text: "review ready", Calls: 5, CallsFailed: 2}}
 	f := parseFlow(t, `
 tools: ["repo-dev"]
 steps:
   - name: judge
-    instruction: "разбери MR"
+    instruction: "review the MR"
     save_as: out
 `)
 	_, outcome, err := ExecuteWith(context.Background(), f, Deps{Runner: r}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "ok", outcome.Steps[0].Outcome)
-	assert.Equal(t, 2, outcome.Steps[0].CallsFailed, "число отказов видно и на успешном шаге")
+	assert.Equal(t, 2, outcome.Steps[0].CallsFailed, "the failure count is visible on a successful step too")
 }
 
-// Бюджет промахов из описания обязан доехать до исполнителя. Поле, объявленное
-// в схеме и не переданное дальше, — украшение: скилл его пишет, а движок живёт
-// по умолчанию, и расхождение молчит (ровно так `deliver` у ассета прожил до
-// первого живого отказа).
+// The miss budget from the skill must reach the executor. A field declared in
+// the schema and not passed on is decoration: the skill writes it while the
+// engine lives by its default, and the divergence stays silent (exactly how an
+// asset's `deliver` lived until the first live failure).
 func TestMaxToolErrorsReachesRunner(t *testing.T) {
-	r := &fakeRunner{answer: map[string]string{"judge": "готово"}}
+	r := &fakeRunner{answer: map[string]string{"judge": "done"}}
 	_, err := run(t, `
 tools: ["repo-dev"]
 steps:
   - name: judge
-    instruction: "разбери MR"
+    instruction: "review the MR"
     max_calls: 6
     max_tool_errors: 4
     save_as: out

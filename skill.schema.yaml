@@ -1,88 +1,96 @@
-# Полная схема файла скилла
+# The full schema of a skill file
 #
-# Скилл — ЧИСТЫЙ YAML-файл `<name>.yaml`.
-#   - валидация ЭТОЙ схемой в редакторе и в CI, до исполнения;
-#   - автодополнение полей по схеме в IDE;
+# A skill is a PLAIN YAML file `<name>.yaml`.
+#   - validated by THIS schema in the editor and in CI, before execution;
+#   - field autocompletion from the schema in an IDE;
 #
-# Ход скилла описывается полем `workflow` — последовательностью шагов. Поле
-# `playbook` (многострочный текст) — свободная инструкция исполнителю: подходит
-# там, где шаги избыточны.
+# A skill's turn is described by the `workflow` field — a sequence of steps. The
+# `playbook` field (multi-line text) is a free-form instruction to the executor:
+# it fits where steps would be overkill.
 #
-# $schema: JSON Schema draft 2020-12, записанная в YAML.
+# A Russian translation of this file is kept alongside as `skill.schema.ru.yaml`;
+# only this one is embedded into the engine and is the source of truth. The two
+# are kept structurally identical by a test.
+#
+# $schema: JSON Schema draft 2020-12, written in YAML.
 
 $schema: https://json-schema.org/draft/2020-12/schema
 title: Skill
 type: object
-# Обязательны только те поля, без которых скилл не может быть выбран и исполнен
-# `trigger_examples`, `servers`, `role` в `skill-writer` опциональны
+# Required are only the fields without which a skill cannot be selected and run.
+# `trigger_examples`, `servers` and `role` are optional.
 required: [skill_engine_version, name, description]
 additionalProperties: false
 
 properties:
 
   # ─────────────────────────────────────────────────────────────────────
-  # Версии: формата и самого скилла. Разные вещи, обе нужны.
+  # Versions: of the format and of the skill itself. Different things, both needed.
   # ─────────────────────────────────────────────────────────────────────
 
   skill_engine_version:
     type: string
     pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
-    examples: ["1.0.0"]
+    examples: ["2.0.0"]
     description: |
-      Версия ФОРМАТА, под которую написан скилл — фактически «какой
-      минимум движка мне нужен». Движок читает поле и знает, как
-      интерпретировать файл.
+      The FORMAT version this skill was written for — in effect "what minimum
+      engine do I need". The engine reads the field and knows how to interpret
+      the file.
 
-      Семантика частей:
-        major — несовместимое изменение формата: скилл прошлого мажора без
-                миграции не читается (сменилась семантика поля, исчезла
-                конструкция);
-        minor — добавлено необязательное поле. Скилл, который им пользуется,
-                требует движок НЕ НИЖЕ этой минорной версии — в этом и польза
-                минора: он выражает требуемый минимум, а не просто «что-то
-                добавили»;
-        patch — исправления движка, формат не изменился.
+      What the parts mean:
+        major — an incompatible format change: a skill of a previous major does
+                not load without migration (a field changed meaning, a construct
+                disappeared);
+        minor — an optional field was added. A skill that uses it requires an
+                engine NO OLDER than that minor version — that is the point of a
+                minor: it expresses the required minimum rather than merely
+                "something was added";
+        patch — engine fixes, the format did not change.
 
-      Зачем. Пользовательские скиллы живут в `хранилище файлов` и НЕ обновляются с
-      деплоем: сменив семантику поля, мы молча меняем поведение чужих скиллов,
-      написанных под старые правила. Пример живого риска: `tools: []` сегодня
-      значит «инструментов не выдавать», и это ЦЕНТРАЛЬНАЯ конструкция формата;
-      если завтра пустой список начнёт значить «набор потока», старые скиллы
-      получат доступ, который автор снимал намеренно, — и никто не заметит.
+      Why. User skills live in file storage and are NOT updated with a deploy:
+      change the meaning of a field and we silently change the behaviour of
+      other people's skills, written under the old rules. A live risk:
+      `tools: []` today means "hand out no tools", and that is a CENTRAL
+      construct of the format; let an empty list start meaning "the flow's set"
+      tomorrow and old skills gain access their author deliberately withheld —
+      and nobody notices.
 
-      Движок обязан уметь читать все выпущенные мажоры — или отказывать внятно
-      («скилл требует 2.1.0, движок умеет 1.4.0»), а не молча исполнять по
-      старым правилам.
+      An engine either knows how to read several majors or refuses explicitly,
+      but it has no right to silently run under the old rules. This engine
+      REFUSES: a foreign major is an error in both directions, because a
+      description of a previous major would parse without a single complaint,
+      silently losing fields that no longer exist in the structs.
 
-      Отсутствует (legacy-скиллы) → читается как 1.0.0.
+      Absent (legacy skills) → read as 1.0.0.
 
   skill_version:
     type: string
     pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
     examples: ["1.0.0", "2.3.1"]
     description: |
-      Версия САМОГО скилла (semver). Двигается при каждой значимой
-      правке, и по номеру видно, ЧТО за правка была:
+      The version of THE SKILL ITSELF (semver). It moves on every significant
+      edit, and the number shows WHAT kind of edit it was:
 
-        major — сменилась парадигма скилла, сломана обратная совместимость:
-                скилл делает принципиально другое или иначе (что бы это ни
-                значило в контексте конкретного скилла);
-        minor — добавлены новые ходы/узлы, отрефакторены старые: состав шагов
-                изменился;
-        patch — мелкие правки, тюнинг промптов: состав шагов тот же.
+        major — the skill's paradigm changed, backward compatibility is broken:
+                the skill does something fundamentally different, or does it
+                differently (whatever that means for a particular skill);
+        minor — new turns/nodes added, old ones refactored: the set of steps
+                changed;
+        patch — small edits, prompt tuning: the set of steps is the same.
 
-      Различение НЕ косметическое — оно нужно при чтении замеров: перевод шага
-      на `call:` (новый узел, minor) меняет ЦЕНУ хода, а правка формулировки
-      (patch) — только точность ветвления. Без различения обе группы выглядят
-      одинаково: «скилл поменялся».
+      The distinction is NOT cosmetic — it is needed when reading measurements:
+      moving a step onto `call:` (a new node, minor) changes the COST of a turn,
+      while an edit to a wording (patch) only changes branching accuracy.
+      Without the distinction both groups look the same: "the skill changed".
 
-      Зачем. Скилл может правится часто, и после каждой правки снимается
-      замер. Если в события пишется только ИМЯ скилла, через неделю уже не
-      определить, какая версия дала какие числа: сравнение «было 10 вызовов,
-      стало 3» без версии — сравнение неизвестно чего с неизвестно чем.
+      Why. A skill may be edited often, and a measurement is taken after every
+      edit. If only the skill's NAME goes into the events, a week later there is
+      no telling which version produced which numbers: comparing "it was 10
+      calls, now it is 3" without a version compares something unknown with
+      something unknown.
 
   # ─────────────────────────────────────────────────────────────────────
-  # Идентификация и роутинг: когда этот скилл вообще выбирается
+  # Identity and routing: when this skill gets selected at all
   # ─────────────────────────────────────────────────────────────────────
 
   name:
@@ -90,107 +98,172 @@ properties:
     pattern: "^[a-z0-9][a-z0-9_-]{0,48}[a-z0-9]$|^[a-z0-9]$"
     maxLength: 50
     description: |
-      Имя скилла = имя файла.
+      The skill's name = the file's name.
 
-      Регулярка взята ИЗ КОДА (`ValidateSkillName`): она допускает подчёркивание.
+      The regexp is taken FROM THE CODE (`ValidateSkillName`): it allows an
+      underscore.
 
   description:
     type: string
     description: |
-      Для ЧЕГО скилл. Идёт в эмбеддинг матчера — от точности
-      этого текста зависит, выберется ли скилл. Полезно писать и то, для чего
-      скилл НЕ нужен ("НЕ для поиска по вики") — отрицания снимают путаницу
-      между близкими скиллами.
+      What the skill is FOR. It goes into the matcher's embedding — whether the
+      skill gets selected depends on how precise this text is. It is worth
+      writing what the skill is NOT for as well ("NOT for searching the wiki") —
+      negations remove confusion between neighbouring skills.
 
   trigger_examples:
     type: array
     items: {type: string}
     description: |
-      Живые формулировки, на которые скилл обязан сработать. Матчер
-      считает близость к НИМ, а не только к description.
+      Live phrasings the skill must fire on. The matcher measures closeness to
+      THEM, not only to the description.
 
   servers:
     type: array
     items: {type: string}
     description: |
-      MCP-серверы, доступные скиллу. Это ПОТОЛОК радиуса: `workflow.tools`
-      и `tools` шага могут только сузить его.
+      The MCP servers available to the skill. This is the CEILING of the radius:
+      `workflow.tools` and a step's `tools` can only narrow it.
 
   builtin_tools:
     type: array
     items: {type: string}
     description: |
-      Встроенные инструменты, нужные ИСПОЛНИТЕЛЮ скилла: run_script,
-      script_list, render_diagram и прочие тулы самого приложения (не MCP-серверов).
+      Built-in tools needed by the skill's EXECUTOR: run_script, script_list,
+      render_diagram and other tools of the application itself (not of MCP
+      servers).
 
-      Нужно потому, что воркеру достаётся только `memory` — остальные встроенные
-      тулы есть у оркестратора. Плейбук, велящий воркеру звать `run_script` без
-      этого объявления, промахивается в пустоту: среда исполнения отвечает «тул не
-      существует», модель повторяет тот же вызов до упора бюджета. Линтер ловит
-      расхождение правилом E5.
+      Needed because a worker only gets `memory` — the other built-in tools
+      belong to the orchestrator. A playbook telling a worker to call
+      `run_script` without this declaration fires into the void: the runtime
+      answers "no such tool", and the model repeats the same call until the
+      budget runs out. A linter catches the divergence with rule E5.
 
   role:
     type: string
     description: |
-      Имя профиля исполнения. Значение задаёт ПРИЛОЖЕНИЕ: за именем у него
-      стоят бюджеты вызовов, wall-clock, температура, усилие рассуждения.
+      The name of an execution profile. The value is defined by the
+      APPLICATION: behind the name it keeps call budgets, wall-clock limits,
+      temperature, reasoning effort.
 
-      Схема список не закрывает — профили у каждого свои. Примеры имён и того,
-      что за ними может стоять, — в examples/.
+      The schema does not close the list — everyone has their own profiles.
+      Example names, and what may stand behind them, are in examples/.
 
   kind:
     type: string
     description: |
-      Род скилла — метка для приложения: по ней оно решает, как скилл подавать
-      и исполнять. Схема значение не ограничивает; пример разделения на
-      самостоятельные и составные скиллы — в examples/.
+      The skill's kind — a label for the application: it decides from this how
+      to present and execute the skill. The schema does not restrict the value;
+      an example of splitting into standalone and composite skills is in
+      examples/.
 
   temperature:
     type: number
     minimum: 0
     maximum: 1
     description: |
-      Оверрайд температуры для всего скилла. Редкое поле.
-      Диапазон [0,1] — как в коде.
+      A temperature override for the whole skill. A rare field. The range [0,1]
+      matches the code.
 
-      ВНИМАНИЕ: на пути ПРОГРАММЫ это поле не действует — модель шага строится
-      с Temperature 0. Параметры генерации задаются ШАГУ (`sampling:`), потому
-      что у шагов разная работа: классификатору нужен ноль, формулировке
-      ответа — теплее.
+      NOTE: on the PROGRAM path this field has no effect — a step's model is
+      built with Temperature 0. Generation parameters are set on the STEP
+      (`sampling:`), because steps do different work: a classifier needs zero,
+      wording an answer needs it warmer.
 
   disabled:
     type: boolean
     default: false
-    description: "Выключить скилл, не удаляя файл."
+    description: "Turn the skill off without deleting the file."
 
   # ─────────────────────────────────────────────────────────────────────
-  # Программа: как скилл исполняется по шагам
+  # The program: how the skill executes, step by step
   # ─────────────────────────────────────────────────────────────────────
+
+  mode:
+    enum: [workflow, playbook]
+    description: |
+      Which of the two descriptions to run when both are set: workflow or playbook.
+
+      The field is optional: without it the default applies — "there is a
+      `workflow` → we follow it".
+
+      The full table (the same one implemented by `ResolveMode` in the engine):
+
+        mode        workflow  playbook  →  what runs
+        ─────────── ───────── ───────── ─── ────────────────────────────────
+        unset       present   present   →  workflow (structure outranks prose)
+        unset       present   —         →  workflow
+        unset       —         present   →  playbook
+        unset       —         —         →  ERROR: the skill describes no turn
+        workflow    present   any       →  workflow
+        workflow    —         present   →  ERROR: mode workflow, no steps
+        playbook    any       present   →  playbook
+        playbook    present   —         →  ERROR: mode playbook, no text
+
+      Why the field exists at all. Moving a prompt into steps does not happen in
+      one leap: it is convenient to keep both descriptions and switch between
+      them, comparing outcomes on live requests. Without an explicit switch such
+      a comparison means deleting half the work — with nowhere to get it back
+      from.
+
+      Why an empty half is an ERROR rather than a fallback to the other one. A
+      silent fallback looks like success here: switch the mode to `playbook`,
+      forget to write the text, and the author gets a clean run over the old
+      steps and concludes "in playbook mode it works the same" — from a turn the
+      playbook never took part in. The error costs one edit, the false
+      conclusion costs a whole debugging cycle.
+
+      The field appeared in format 2.0.0. An engine that does not know it will
+      silently follow `workflow` — that is, right past what the author switched;
+      the declared `skill_engine_version` is what protects against that.
 
   workflow:
     $ref: "#/$defs/Workflow"
     description: |
-      Описание хода шагами. Задано → ход исполняется по ним; не задано →
-      по свободной инструкции из `playbook`.
+      The turn described in steps.
+
+      What runs when both steps and a `playbook` are set is decided by `mode`
+      (steps by default).
 
   playbook:
     type: string
     description: |
-      Свободная инструкция исполнителю: что сделать и на что смотреть.
-      Применяется, когда `workflow` не задан.
+      A free-form instruction to the executor: what to do and what to look at.
+      A full way to describe a skill rather than a draft: a skill that has only
+      this field runs as an ordinary prompt — the engine takes no part in such a
+      turn, the embedding application runs it.
 
-      Держать оба представления сразу не стоит: два действующих описания одного
-      скилла расходятся, и какое из них исполняется становится вопросом
-      конфигурации, а не текста. Как правило новый скил проще сначала в это поле записать,
-      затем отладить, и после этого переносить в workflow ради четкости и оптимизации
+      As a rule a new skill is easier to write here first and debug, and only
+      then move into `workflow` for the sake of clarity and the cost of a turn.
+      While the move is under way both descriptions may be kept — which of them
+      is in effect is set by `mode`.
 
   meta:
     type: object
     description: |
-      Произвольные данные для приложения: расписание запуска, владелец,
-      теги, что угодно ещё. Движок сюда не смотрит и форму не проверяет —
-      поле существует, чтобы такие вещи не приходилось изобретать заново
-      каждому встраивающему. Образцы наполнения — в examples/.
+      Arbitrary data for the application: a run schedule, an owner, tags,
+      anything else. The engine does not look in here and does not check the
+      shape — the field exists so that every embedder does not have to reinvent
+      such things. Sample contents are in examples/.
+
+# An explicit mode must have a description under it. These two rules catch in
+# the editor and in CI exactly what people otherwise trip over at run time: the
+# mode was switched and the other half was never written (see `mode`).
+#
+# `required: [mode]` inside `if` is essential: without it a skill WITHOUT a
+# `mode` field satisfies the condition vacuously and inherits someone else's
+# requirement.
+allOf:
+  - if:
+      required: [mode]
+      properties: {mode: {const: workflow}}
+    then:
+      required: [workflow]
+  - if:
+      required: [mode]
+      properties: {mode: {const: playbook}}
+    then:
+      required: [playbook]
 
 $defs:
 
@@ -199,47 +272,49 @@ $defs:
     type: object
     additionalProperties: false
     description: |
-      Как тянуть внешний ассет. Сеть в горячем пути хода — риск
-      реальный, но лечится он политикой, а не запретом: без свежести внешний
-      ассет теряет смысл.
+      How to retrieve an external asset. Network on the hot path of a turn is a
+      real risk, but it is treated with a policy rather than a ban: without
+      freshness an external asset loses its point.
 
     properties:
       ttl:
         type: string
         default: "0s"
         description: |
-          Сколько содержимое считается свежим. `0s` — тянуть каждый раз
-          (умолчание: внешний ассет для того и внешний). `10m`, `1h`, `24h` —
-          допустимый возраст кеша; разумно для кода из репы, где правки редки.
+          How long the content counts as fresh. `0s` — fetch every time (the
+          default: an external asset is external for a reason). `10m`, `1h`,
+          `24h` — an acceptable cache age; sensible for code from a repository,
+          where edits are rare.
       timeout:
         type: string
         default: "5s"
         description: |
-          Потолок на ОДНУ попытку. Жёсткий: ход не должен висеть на чужой
-          недоступности.
+          The ceiling on ONE attempt. A hard one: a turn must not hang on
+          someone else's downtime.
       retries:
         type: integer
         default: 2
         minimum: 0
         maximum: 5
         description: |
-          Сколько ПОВТОРОВ сверх первой попытки, с экспоненциальной паузой.
-          Повторяется только transient:
-          повтор на 404 или 403 не изменит исход, а бюджет хода съест.
+          How many RETRIES beyond the first attempt, with exponential backoff.
+          Only transient failures are retried: retrying a 404 or a 403 will not
+          change the outcome and will eat the turn's budget.
       on_unavailable:
         enum: [fail, stale, empty]
         default: fail
         description: |
-          Что делать, когда достать не удалось после всех попыток:
-            fail  — ассет недоступен, шаг получает отказ и решает по `on_error`;
-            stale — отдать последнюю удачную копию, ЕСЛИ она есть (иначе fail);
-            empty — отдать пустоту, шаг разбирается сам.
+          What to do when retrieval failed after all the attempts:
+            fail  — the asset is unavailable, the step gets a failure and
+                    decides by its `on_error`;
+            stale — hand out the last successful copy IF there is one (fail
+                    otherwise);
+            empty — hand out nothing, the step deals with it itself.
 
-          `stale` — единственный режим, где ход продолжается на устаревших
-          данных, поэтому деградация обязана быть ГРОМКОЙ: метрика и запись в
-          лог со сроком давности копии. Молча подставленная вчерашняя
-          страница новостей — худший из возможных исходов: ответ выглядит нормальным
-          и не проверяется.
+          `stale` is the only mode where a turn continues on outdated data, so
+          the degradation must be LOUD: a metric and a log entry with the copy's
+          age. A yesterday's news page substituted silently is the worst
+          possible outcome: the answer looks normal and never gets checked.
 
   # ─────────────────────────────────────────────────────────────────────
   Workflow:
@@ -251,28 +326,29 @@ $defs:
         type: array
         minItems: 1
         items: {$ref: "#/$defs/Step"}
-        description: "Шаги, исполняемые по порядку."
+        description: "The steps, executed in order."
       assets:
         type: object
         additionalProperties: {$ref: "#/$defs/Asset"}
         description: |
-          Именованные полезные нагрузки, которые скилл передаёт инструменту, не пропуская через контекст модели.
+          Named payloads a skill hands to a tool without passing them through
+          the model's context.
 
-          Зачем вообще: мид модель не может точно воспроизвести многокилобайтный литерал
-          через аргумент инструмента — он его РЕГЕНЕРИРУЕТ и портит.
-          Ассет решает это структурно: содержимое резолвится хост-сайд.
+          Why at all: a model cannot reproduce a multi-kilobyte literal
+          precisely through a tool argument — it REGENERATES and corrupts it.
+          An asset solves that structurally: the content is resolved host-side.
 
       tools:
         type: array
         items: {type: string}
         description: |
-          Радиус доступа потока. Умолчание — `servers` скилла.
-          Задаётся, чтобы СУЗИТЬ: поток может оставить один сервер из двух,
-          объявленных скиллом.
+          The flow's access radius. The default is the skill's `servers`. It is
+          set in order to NARROW: a flow may keep one of the two servers the
+          skill declared.
       vars:
         type: object
         additionalProperties: {type: string}
-        description: "Начальные значения переменных."
+        description: "Initial values of the variables."
 
   # ─────────────────────────────────────────────────────────────────────
   Step:
@@ -280,163 +356,169 @@ $defs:
     allOf:
       - $ref: "#/$defs/StepDependencies"
     description: |
-      Шаг несёт РОВНО ОДНО действие: instruction | call | set |
-      switch | if. Проверяется до исполнения.
+      A step carries EXACTLY ONE action: instruction | call | set | switch | if.
+      Checked before execution.
 
-      Переменные, доступные всегда:
-        {{input}}   — сообщение пользователя
-        {{history}} — предыдущие реплики разговора (2 обмена)
-      Неизвестная переменная разворачивается в пустую строку, а не в текст
-      маркера: доехавший до модели `{{foo}}` читается как часть инструкции.
+      Variables available at all times:
+        {{input}}   — the user's message
+        {{history}} — previous turns of the conversation (2 exchanges)
+      An unknown variable expands to an empty string rather than to the marker's
+      text: a `{{foo}}` that reached the model reads as part of the instruction.
     properties:
       name:
         type: string
-        description: "Имя шага — для логов, событий и диагностики. Необязательное."
+        description: "The step's name — for logs, events and diagnostics. Optional."
 
-      # --- действие 1: работу делает модель --------------------------------
+      # --- action 1: the model does the work --------------------------------
       instruction:
         type: string
         description: |
-          Что сделать. Исполняется узким агентом
-          РОВНО с теми инструментами, что перечислены в `tools` шага.
+          What to do. Executed by a narrow agent with EXACTLY the tools listed
+          in the step's `tools`.
       tools:
         type: array
         items: {type: string}
         description: |
-          Инструменты ЭТОГО шага. Не задано → набор потока.
-          ПУСТОЙ СПИСОК → инструментов не выдаётся вовсе, и это главная
-          конструкция формата: запрет «в тот источник не ходи» становится
-          невыполнимым вместо того, чтобы быть попрошенным.
-          Расширить набор потока нельзя — только сузить.
+          The tools of THIS step. Unset → the flow's set.
+          An EMPTY LIST → no tools are handed out at all, and this is the
+          format's main construct: the prohibition "do not go to that source"
+          becomes impossible to violate instead of being requested.
+          The flow's set cannot be widened — only narrowed.
       max_calls:
         type: integer
         minimum: 0
         description: |
-          Потолок вызовов инструментов на шаге. Поле ШАГА, потому что в
-          живых скиллах лимиты разные: поиск по коду — одна попытка, обход
-          дерева — до восьми.
+          The ceiling on tool calls in the step. A field of the STEP, because in
+          live skills the limits differ: a code search — one attempt, walking a
+          tree — up to eight.
 
-          0 — НЕ «без ограничения»: подставляется потолок исполнителя.
-          Безлимитного шага в формате нет намеренно.
+          0 is NOT "unlimited": the executor's ceiling is substituted. An
+          unlimited step is deliberately absent from the format.
       one_of:
         type: array
         items: {type: string}
         description: |
-          Допустимые значения результата. Шаг-классификатор существует
-          ради ветвления, а switch сравнивает ТОЧНО.
-          Реализуется двумя слоями:
-            1) грамматика декодирования (enum), где модель шага её держит —
-               значение вне списка НЕВОЗМОЖНО;
-            2) нормализация кодом — фолбэк; берёт последнее вхождение и
-               ЛОМАЕТСЯ на «это точно common, а не foreign» (даст foreign).
+          The allowed values of the result. A classifier step exists for the
+          sake of branching, and a switch compares EXACTLY.
+          Implemented in two layers:
+            1) a decoding grammar (enum), where the step's model holds one — a
+               value outside the list is IMPOSSIBLE;
+            2) normalisation in code — a fallback; it takes the last occurrence
+               and BREAKS on "this is definitely common, not foreign" (it would
+               give foreign).
       model:
         type: string
         description: |
-          Модель шага. Два мотива: классификатору не нужна большая
-          модель (цена) и только там, где путь до модели её доносит работает грамматика.
+          The step's model. Two motives: a classifier does not need a large
+          model (cost), and a grammar only works where the path to the model
+          carries it.
       response_schema:
         type: object
         description: |
-          Схема структурного ответа шага. Результат кладётся в переменную
-          объектом, поля доступны как `{{var.field}}` — ОДИН уровень вложенности.
+          The schema of the step's structured answer. The result is stored in
+          the variable as an object, fields reachable as `{{var.field}}` — ONE
+          level of nesting.
 
-          Зачем: `01-fetch-logs` извлекает кластер, namespace и под ОДНИМ шагом
-          вместо трёх, то есть −2 генерации на ход в скилле, где их всего 3–4.
+          Why: `01-fetch-logs` extracts the cluster, the namespace and the pod in
+          ONE step instead of three, i.e. −2 generations per turn in a skill
+          that has only 3–4 of them.
 
-          Осмысленна только там, где работает грамматика декодирования: на
-          на некоторых путях схема выбрасывается МОЛЧА, и «структурный ответ»
-          выродится в «модель обычно отвечает JSON» — необнаруживаемую дыру.
-          Поэтому `model:` ОБЯЗАТЕЛЕН рядом (`dependentRequired` ниже): шаги
-          идут на модели субагента, где схема не
-          применяется, и умолчание молча ломало бы разбор.
+          Meaningful only where a decoding grammar works: on some paths the
+          schema is dropped SILENTLY, and a "structured answer" degenerates into
+          "the model usually answers JSON" — an undetectable hole. That is why
+          `model:` is MANDATORY alongside (`dependentRequired` below): steps run
+          on a subagent's model, where the schema is not applied, and the default
+          would silently break parsing.
 
       sampling:
         $ref: "#/$defs/Sampling"
 
-      # --- действие 2: работу делает код -----------------------------------
+      # --- action 2: code does the work -----------------------------------
       call:
         $ref: "#/$defs/Call"
 
-      # --- действие 3: вычисление ------------------------------------------
+      # --- action 3: computation ------------------------------------------
       set:
         $ref: "#/$defs/Set"
 
-      # --- действие 4-5: ветвление ------------------------------------------
+      # --- actions 4-5: branching ------------------------------------------
       switch:
         $ref: "#/$defs/Switch"
       if:
         $ref: "#/$defs/If"
 
-      # --- действие 6: выход из скилла ---------------------------------------
+      # --- action 6: leaving the skill ---------------------------------------
       exit:
         $ref: "#/$defs/Exit"
 
-      # --- действие 7: передать работу другому скиллу -------------------------
+      # --- action 7: hand the work to another skill -------------------------
       delegate:
         $ref: "#/$defs/Delegate"
 
-      # --- действие 8: повторить шаги по коллекции ----------------------------
+      # --- action 8: repeat steps over a collection ----------------------------
       for_each:
         $ref: "#/$defs/ForEach"
 
-      # --- действие 9: несколько веток одновременно --------------------------
+      # --- action 9: several branches at once --------------------------
       parallel:
         $ref: "#/$defs/Parallel"
 
-      # --- общее -------------------------------------------------------------
+      # --- common -------------------------------------------------------------
       on_server:
         type: string
         description: |
-          На КАКОМ сервере исполняется шаг. Поддерживает `{{var}}` —
-          имя вычисляется на исполнении.
+          WHICH server the step runs on. Supports `{{var}}` — the name is
+          computed at execution time.
 
-          Для `call:` — адресат вызова; для `instruction:` — чьи инструменты
-          выдаются шагу.
+          For `call:` — the address of the call; for `instruction:` — whose
+          tools the step is handed.
 
-          Зачем: некоторые скиллы могут нести ВАРИАНТЫ одного сервера
-          (repo-dev/prod, много k8s-кластеров, prometheus dev/prod). Без выбора
-          на исполнении каждый требует `switch` из 2–5 почти одинаковых веток.
-          Сильнее подстановки в `call.tool`, потому что сужает радиус и у
-          шага-МОДЕЛИ: сегодня `list-pods` отдаёт ей инструменты всех пяти
-          кластеров сразу.
+          Why: some skills carry VARIANTS of one server (repo-dev/prod, many
+          k8s clusters, prometheus dev/prod). Without a runtime choice each of
+          them needs a `switch` of 2–5 nearly identical branches. Stronger than
+          substitution inside `call.tool`, because it also narrows the radius of
+          a MODEL step: today `list-pods` hands it the tools of all five clusters
+          at once.
 
-          Права не ослабевают: `allowServer` проверяет ПОДСТАВЛЕННОЕ имя, и оно
-          обязано входить в набор потока.
+          Permissions are not weakened: `allowServer` checks the SUBSTITUTED
+          name, and it must belong to the flow's set.
 
       when:
         type: string
         description: |
-          Условие применимости шага (тот же синтаксис, что у `if.cond`).
-          Ложно → шаг пропускается, поток идёт дальше.
+          The step's applicability condition (same syntax as `if.cond`).
+          False → the step is skipped, the flow moves on.
 
-          Зачем отдельно от `if:`: выразимо и через ветвление, но `when:`
-          читается как СВОЙСТВО шага, а не как разветвление потока, и не
-          растит вложенность там, где ветки нет — есть только «делать или нет».
+          Why separate from `if:`: it is expressible with branching too, but
+          `when:` reads as a PROPERTY of the step rather than as a fork in the
+          flow, and does not grow nesting where there is no branch — only "do it
+          or not".
 
-          Например задача подходит скиллу частично. `when:` делает пропуск
-          ВИДИМЫМ в событиях — иначе ход «иногда даёт нужный ответ, иногда
-          нет», и причина не видна.
+          For instance, a task matches the skill only partially. `when:` makes
+          the skip VISIBLE in the events — otherwise the turn "sometimes gives
+          the right answer, sometimes not", with no visible reason.
       save_as:
         type: string
-        description: "Переменная для результата. Пусто — результат не сохраняется."
+        description: "The variable for the result. Empty — the result is not stored."
       on_error:
         enum: [abort, continue, skip]
         default: abort
         description: |
-          Реакция на отказ шага.
-            abort    — прекратить поток (умолчание);
-            continue — записать отказ в переменную и идти дальше;
-            skip     — пропустить остаток ТЕКУЩЕЙ ветки.
-          Отказ по правам помечается DENIED:, прочий сбой — ERROR:; политика
-          их различает, ветвление `is empty` — нет.
+          The reaction to a step's failure.
+            abort    — stop the flow (default);
+            continue — record the failure into a variable and move on;
+            skip     — skip the rest of the CURRENT branch.
+          A permission refusal is marked DENIED:, any other breakage ERROR:; the
+          policy tells them apart, an `is empty` branch does not.
 
   # ─────────────────────────────────────────────────────────────────────
-  # Связки, проверяемые схемой (ошибка видна в редакторе, а не в проде).
-  # StepDependencies применяется к Step через allOf ниже.
+  # Pairings checked by the schema (the error is visible in the editor, not in
+  # production). StepDependencies is applied to Step through the allOf above.
   StepDependencies:
     dependentRequired:
-      # Грамматика декодирования доезжает не на всяком пути до модели МОЛЧА, а шаги идут
-      # на модели субагента (gpt-oss). Схема без выбора модели = тихая дыра.
+      # A decoding grammar does not survive every path to the model, and it
+      # fails SILENTLY, while steps run on a subagent's model. A schema without
+      # a model choice = a silent hole.
       response_schema: [model]
 
   # ─────────────────────────────────────────────────────────────────────
@@ -445,26 +527,26 @@ $defs:
     required: [tool]
     additionalProperties: false
     description: |
-      Вызов инструмента БЕЗ участия модели. Ни инструкции, ни выбора,
-      ни пересказа — результат попадает в переменную дословно.
+      A tool call WITHOUT the model. No instruction, no choice, no retelling —
+      the result lands in the variable verbatim.
 
-      Здесь основной выигрыш формата: шаг-модель стоит ДВЕ генерации (решить
-      позвать + пересказать), и обе лишние, когда аргументы известны заранее.
-      Замер: 6 → 3 генерации на ход.
+      This is where the format's main win is: a model step costs TWO generations
+      (decide to call + retell), and both are redundant when the arguments are
+      known in advance. Measured: 6 → 3 generations per turn.
 
-      Права НЕ обходятся: вызов идёт через ту же цепочку BeforeCall, что и
-      вызов от модели (policy/RBAC, pattern-детектор, session-бюджет, события,
-      OTel), и не может назвать сервер вне набора потока.
+      Permissions are NOT bypassed: the call goes through the same BeforeCall
+      chain as a call from the model (policy/RBAC, pattern detector, session
+      budget, events, OTel), and it cannot name a server outside the flow's set.
     properties:
       tool:
         type: string
         pattern: "^[^:]+(:.+)?$"
-        description: "Инструмент в форме «сервер:инструмент»."
+        description: "The tool, in the form \"server:tool\"."
       args:
         type: object
         description: |
-          Аргументы. {{var}} подставляется в СТРОКОВЫЕ значения, включая
-          вложенные; числа, флаги и форма объекта остаются как записаны.
+          The arguments. {{var}} is substituted into STRING values, nested ones
+          included; numbers, flags and the object's shape stay as written.
       save_as: {type: string}
       on_error:
         enum: [abort, continue, skip]
@@ -474,70 +556,71 @@ $defs:
     type: object
     additionalProperties: false
     description: |
-      Параметры генерации ЭТОГО шага.
+      The generation parameters of THIS step.
 
-      Единица настройки — шаг, а не скилл, по той же причине, по которой шагу
-      принадлежат `tools` и `max_calls`: у шагов разная работа. Классификатору
-      нужна нулевая температура и жёсткое сэмплирование — он выбирает из двух
-      значений; финальной формулировке ответа — потеплее, иначе текст выходит
-      деревянным. Один параметр на весь скилл обслуживает оба плохо.
+      The unit of tuning is a step, not a skill, for the same reason `tools` and
+      `max_calls` belong to a step: steps do different work. A classifier needs
+      zero temperature and tight sampling — it picks between two values; the
+      final wording of an answer needs it warmer, or the text comes out wooden.
+      One parameter for the whole skill serves both badly.
 
-      Заданное здесь перекрывает умолчания движка; незаданное берётся из
-      профиля модели. Набор сверен - это ровно то, что доезжает до инференса,
-      без выдуманных ручек.
+      What is set here overrides the engine's defaults; what is not set comes
+      from the model's profile. The set has been checked against reality — it is
+      exactly what reaches inference, with no invented knobs.
     properties:
       temperature:
         type: number
         minimum: 0
         maximum: 2
         description: |
-          0 — детерминированно (классификаторы, извлечение полей, вызовы по
-          шаблону); выше — свободнее (формулировка ответа человеку).
+          0 — deterministic (classifiers, field extraction, templated calls);
+          higher — freer (wording an answer for a human).
       top_p:
         type: number
         minimum: 0
         maximum: 1
-        description: "Nucleus sampling. 0 → параметр не передаётся."
+        description: "Nucleus sampling. 0 → the parameter is not passed."
       top_k:
         type: integer
         minimum: 0
-        description: "Отсечка по числу кандидатов. 0 → не передаётся."
+        description: "A cut-off by number of candidates. 0 → not passed."
       min_p:
         type: number
         minimum: 0
         maximum: 1
-        description: "Порог вероятности кандидата. 0 → не передаётся."
+        description: "A candidate's probability threshold. 0 → not passed."
       max_tokens:
         type: integer
         minimum: 1
         description: |
-          Потолок выходных токенов ЭТОГО шага; не задан — действует глобальный
-          MaxOutputTokens. Нужен там, где шаг по природе краток, а сорвавшаяся
-          генерация дорога.Поднять выше окна модели нельзя —
-          кламп идёт после переопределения.
+          The output-token ceiling of THIS step; unset — the global
+          MaxOutputTokens applies. Needed where a step is short by nature while
+          a runaway generation is expensive. It cannot be raised above the
+          model's window — the clamp happens after the override.
       repetition_penalty:
         type: number
         minimum: 0
         description: |
-          Штраф за повтор. Полезен шагам, склонным зацикливаться на длинных
-          перечислениях.
-      
-          ОСТОРОЖНО С `response_schema`: в структурном ответе повтор И ЕСТЬ
-          структура — кавычки, двоеточия, одни и те же имена полей в каждом
-          элементе списка. Штраф давит ровно их и толкает модель прочь от
-          продолжения списка.
-      
-          Замер на ответе из двух списков объектов: без штрафа и при 1.05 — по
-          пять элементов в каждом; при 1.15 — упёрся в потолок и не разобрался;
-          при 1.30 — СПИСКИ ПУСТЫ. Последнее опаснее всего: пустой список
-          выглядит как «нечего сказать», а не как отказ.
-      
+          A penalty for repetition. Useful for steps prone to looping on long
+          enumerations.
+
+          CAREFUL WITH `response_schema`: in a structured answer repetition IS
+          the structure — quotes, colons, the same field names in every element
+          of a list. The penalty presses on exactly those and pushes the model
+          away from continuing the list.
+
+          Measured on an answer made of two lists of objects: without a penalty
+          and at 1.05 — five elements in each; at 1.15 — it hit the ceiling and
+          did not parse; at 1.30 — THE LISTS ARE EMPTY. The last is the most
+          dangerous: an empty list looks like "nothing to report" rather than
+          like a failure.
+
       reasoning:
         type: string
         description: |
-          Глубина рассуждения — у моделей, которые её поддерживают. Шкалу
-          задаёт вендор модели, поэтому схема значение не ограничивает.
-          Уровень задаётся ШАГУ, которому он нужен, а не всему скиллу.
+          Reasoning depth — on models that support it. The scale is set by the
+          model's vendor, so the schema does not restrict the value. The level
+          is set on the STEP that needs it, not on the whole skill.
 
   # ─────────────────────────────────────────────────────────────────────
   Delegate:
@@ -545,23 +628,23 @@ $defs:
     required: [skill, task]
     additionalProperties: false
     description: |
-      Передать работу другому скиллу. Это то, чем заняты
-      composite-скиллы (`kind: composite`).
+      Hand the work to another skill. This is what composite skills
+      (`kind: composite`) are made of.
 
-      Без этого действия composite-скилл, получивший `workflow`, исполнился бы
-      как обычный поток и ПОТЕРЯЛ бы спавн-инструменты целиком — то есть
-      перестал бы делать своё дело.
+      Without this action a composite skill handed a `workflow` would execute as
+      an ordinary flow and LOSE the spawn tools entirely — that is, stop doing
+      its job.
 
-      Радиус делегата — радиус ВЫЗВАННОГО скилла, а не вызывающего: скилл
-      объявляет свои серверы сам, и делегирование не расширяет доступ
-      вызывающего (тот же принцип, что у `spawn_subagent` сегодня).
+      A delegate's radius is the radius of the CALLED skill, not of the caller:
+      a skill declares its own servers, and delegation does not widen the
+      caller's access (the same principle as `spawn_subagent` has today).
     properties:
       skill:
         type: string
-        description: "Имя скилла, которому передаётся работа."
+        description: "The name of the skill the work is handed to."
       task:
         type: string
-        description: "Задача словами; поддерживает {{var}}."
+        description: "The task in words; supports {{var}}."
       save_as: {type: string}
       on_error:
         enum: [abort, continue, skip]
@@ -572,18 +655,19 @@ $defs:
     required: [in, as, steps]
     additionalProperties: false
     description: |
-      Повторить шаги для каждого элемента коллекции.
+      Repeat steps for every item of a collection.
 
     properties:
       in:
         type: string
         description: |
-          Переменная с коллекцией. Массив (например, из `response_schema`)
-          итерируется поэлементно; строка — по непустым строкам. Второе
-          покрывает наблюдаемый случай «список сервисов, добытый инструментом».
+          The variable holding the collection. An array (say, from a
+          `response_schema`) is iterated element-wise; a string, by its
+          non-empty lines. The latter covers the observed case of "a list of
+          services produced by a tool".
       as:
         type: string
-        description: "Имя переменной элемента внутри тела цикла."
+        description: "The name of the item variable inside the loop body."
       steps:
         type: array
         minItems: 1
@@ -591,26 +675,27 @@ $defs:
       collect:
         type: string
         description: |
-          Переменная, куда собираются результаты итераций (строки, разделённые
-          переносом). Не задана — результаты остаются только внутри итерации.
+          The variable the iterations' results are gathered into (strings
+          separated by a line break). Unset — the results stay inside the
+          iteration only.
       max_iterations:
         type: integer
         minimum: 1
         maximum: 50
         default: 10
         description: |
-          Потолок итераций. ОБЯЗАТЕЛЕН по смыслу, даже когда не задан явно:
-          цикл по коллекции неизвестной длины — прямой путь к runaway, а
-          сессионный бюджет остановит его уже после того, как сожжёт ход.
-          Список длиннее потолка обрабатывается частично, и это ГОВОРИТСЯ в
-          результате, а не проглатывается.
+          The iteration ceiling. REQUIRED in spirit even when not set
+          explicitly: a loop over a collection of unknown length is a straight
+          road to a runaway, and the session budget will stop it only after the
+          turn has been burned. A list longer than the ceiling is processed
+          partially, and that is SAID in the result rather than swallowed.
       on_error:
         enum: [abort, continue, skip]
         default: abort
         description: |
-          Что делать, когда итерация отказала. `continue` — пометить и
-          идти дальше: один элемент из пяти не нашёлся — не повод терять
-          остальные четыре.
+          What to do when an iteration failed. `continue` — mark it and move on:
+          one item out of five not being found is no reason to lose the other
+          four.
 
   # ─────────────────────────────────────────────────────────────────────
   Parallel:
@@ -618,11 +703,12 @@ $defs:
     required: [branches]
     additionalProperties: false
     description: |
-      Несколько независимых веток одновременно.
+      Several independent branches at once.
 
-      Ветки НЕ ВИДЯТ переменных друг друга — только те, что были до развилки.
-      Иначе результат зависел бы от порядка завершения, а он недетерминирован;
-      формат существует ради обратного.
+      Branches DO NOT SEE each other's variables — only those that existed
+      before the fork. Otherwise the result would depend on the order of
+      completion, which is non-deterministic; the format exists for the
+      opposite.
     properties:
       branches:
         type: array
@@ -632,28 +718,28 @@ $defs:
           items: {$ref: "#/$defs/Step"}
       collect:
         type: string
-        description: "Переменная, куда сводятся результаты веток по порядку объявления."
+        description: "The variable the branches' results are merged into, in declaration order."
       on_error:
         enum: [abort, continue, skip]
         description: |
-          Поведение при отказе ОДНОЙ ветки. `continue` — самое частое: собрать
-          то, что получилось, и сказать, чего не хватает.
+          The behaviour when ONE branch fails. `continue` is the most common:
+          gather what worked out and say what is missing.
 
   # ─────────────────────────────────────────────────────────────────────
   Exit:
     type: object
     additionalProperties: false
     description: |
-      Прекратить программу и вернуть ход на ОБЫЧНЫЙ путь приложения: скилл
-      подошёл ошибочно, и продолжать по его шагам значит выдать неверный
-      ответ уверенно.
+      Stop the program and return the turn to the application's ORDINARY path:
+      the skill was matched by mistake, and continuing through its steps means
+      confidently producing a wrong answer.
 
-      Приложение узнаёт о выходе событием — промахи маршрутизации остаются
-      размеченными.
+      The application learns about the exit from an event — routing misses stay
+      labelled.
     properties:
       reason:
         type: string
-        description: "Почему вышли — в событие и в лог. Читают при разборе промахов роутинга."
+        description: "Why we left — into the event and the log. Read when diagnosing routing misses."
 
   # ─────────────────────────────────────────────────────────────────────
   Set:
@@ -661,21 +747,21 @@ $defs:
     required: [var, value]
     additionalProperties: false
     description: |
-      Присваивание без обращения к модели. Так выражают правила,
-      которые иначе применяла бы модель:
-      «some-doc → docs/resources/some_doc.md».
+      An assignment without involving the model. This is how rules that a model
+      would otherwise apply are expressed:
+      "some-doc → docs/resources/some_doc.md".
     properties:
       var: {type: string}
       value:
         type: string
-        description: "Поддерживает {{var}}."
+        description: "Supports {{var}}."
 
   # ─────────────────────────────────────────────────────────────────────
   Switch:
     type: object
     required: [var, cases]
     additionalProperties: false
-    description: "Ветвление по значению переменной."
+    description: "Branching on a variable's value."
     properties:
       var: {type: string}
       cases:
@@ -692,18 +778,19 @@ $defs:
     type: object
     required: [cond, then]
     additionalProperties: false
-    description: "Ветвление по условию."
+    description: "Branching on a condition."
     properties:
       cond:
         type: string
         description: |
-          Формы условия:
-            var == значение
-            var != значение
-            var is empty        — пусто ИЛИ помеченный отказ (ERROR:/DENIED:)
+          The forms of a condition:
+            var == value
+            var != value
+            var is empty        — empty OR a marked failure (ERROR:/DENIED:)
             var is not empty
-          `is empty` существует потому, что ветвлению «не нашли — ищем иначе»
-          пустота и отказ означают одно, хотя политике — разное.
+          `is empty` exists because to a "nothing found, try another way" branch
+          emptiness and a failure mean the same thing, even though to the policy
+          they do not.
       then:
         type: array
         items: {$ref: "#/$defs/Step"}
@@ -716,121 +803,138 @@ $defs:
     type: object
     additionalProperties: false
     description: |
-      Именованная нагрузка, передаваемая инструменту по ссылке.
+      A named payload passed to a tool by reference.
 
-      Описывается ДВУМЯ НЕЗАВИСИМЫМИ осями — их намеренно не сводят в один
-      enum, иначе получится комбинаторика (code_inline, code_repo, config_url…):
+      Described along TWO INDEPENDENT axes — deliberately not collapsed into one
+      enum, which would give combinatorics (code_inline, code_repo,
+      config_url…):
 
-        kind   — ЧТО это: code | text | config | data
-        source — ОТКУДА берётся: inline | repo | user_file | url
+        kind   — WHAT it is: code | text | config | data
+        source — WHERE it comes from: inline | repo | user_file | url
 
-      Любая пара осмысленна: конфиг бывает и inline, и из репы; код бывает и
-      тут же в скилле, и подтянутым. Разделение осей — это же и ответ на вопрос
-      «а если завтра появится новый источник»: добавляется значение одной оси,
-      а не N новых типов.
+      Every pair makes sense: a config can be both inline and from a repository;
+      code can be both right here in the skill and pulled in. Splitting the axes
+      is also the answer to "what if a new source appears tomorrow": one axis
+      gains a value rather than the format gaining N new types.
 
-      ДВА СПОСОБА ИСПОЛЬЗОВАНИЯ, и `kind` подсказывает уместный:
+      TWO WAYS TO USE ONE, and `kind` hints at the fitting one:
 
-        {from: "asset:имя"}   в аргументе шага `call:` — содержимое
-                              резолвится ХОСТ-САЙД и через модель НЕ проходит.
-                              Так используют `code` и `config`: модель их не
-                              переписывает, потому что вообще не видит.
+        {from: "asset:name"}  in an argument of a `call:` step — the content is
+                              resolved HOST-SIDE and does NOT pass through the
+                              model. This is how `code` and `config` are used:
+                              the model does not rewrite them because it never
+                              sees them.
 
-        {{asset:имя}}         в тексте `instruction:` — содержимое
-                              ПОДСТАВЛЯЕТСЯ в промпт. Так используют `text` и
-                              `data`: справочник соответствий или шаблон
-                              отчёта бесполезны, если модель их не читает.
+        {{asset:name}}        in the text of an `instruction:` — the content is
+                              SUBSTITUTED into the prompt. This is how `text`
+                              and `data` are used: a lookup table or a report
+                              template is useless unless the model reads it.
 
-      То есть `kind` — не украшение: он отвечает на вопрос «этой нагрузке место
-      в контексте модели или мимо него». Ошибка в выборе видна сразу — код в
-      контексте начнёт «регенерироваться» , а справочник по ссылке не
-      повлияет ни на что.
+      So `kind` is not decoration: it answers the question "does this payload
+      belong in the model's context or past it". A wrong choice is visible
+      immediately — code in the context starts getting "regenerated", while a
+      reference book passed by reference influences nothing.
 
-      Абстракция уже заложена в коде: `asset.Source` (internal/asset/asset.go)
-      с комментарием «SkillBody is the first source ; хранилище файлов / repo@ref
-      plug in here later without touching the core wiring». Схема достраивает
-      задуманное, а не изобретает.
+      Everything that only makes sense for a specific kind (the language for
+      code, the format for text) lives in `params` — not at the asset's top
+      level: otherwise the schema grows with every kind the application invents.
     properties:
 
       kind:
         type: string
         description: |
-          ЧТО это по существу. Схема значение не ограничивает — у каждого
-          приложения свой набор; примеры («код», «справочный текст»,
-          «конфигурация», «данные») — в examples/.
+          WHAT it essentially is. The schema does not restrict the value — every
+          application has its own set; examples ("code", "reference text",
+          "configuration", "data") are in examples/.
 
-          Метка вспомогательная: способ передачи выбирается МЕСТОМ
-          использования, а не ею (см. ниже про две формы ссылки).
+          The label is auxiliary: the way it is passed is chosen by the PLACE of
+          use, not by this (see the two reference forms above).
 
       source:
         type: string
         description: |
-          ОТКУДА берётся содержимое. Имя источника разбирает резолвер
-          приложения — схема список не закрывает (примеры в examples/).
+          WHERE the content comes from. The source's name is interpreted by the
+          application's resolver — the schema does not close the list (examples
+          are in examples/).
 
-          Формату важно одно: содержимое либо ЗДЕСЬ (`content`), либо ПО
-          АДРЕСУ (`ref`). Ровно одно из двух — иначе непонятно, что
-          исполнять.
+          The format cares about one thing: the content is either HERE
+          (`content`) or AT AN ADDRESS (`ref`). Exactly one of the two —
+          otherwise it is unclear what to execute.
 
       content:
         type: string
-        description: "Содержимое. Обязательно при `source: inline`, иначе не указывается."
+        description: "The content. Required with `source: inline`, not given otherwise."
 
       ref:
         type: string
         description: |
-          Адрес содержимого — когда оно лежит не в самом скилле. Форму адреса
-          определяет резолвер приложения (примеры — в examples/).
+          The address of the content — when it does not live in the skill
+          itself. The form of the address is defined by the application's
+          resolver (examples are in examples/).
 
       args:
         type: object
         description: |
-          Аргументы MCP-вызова для `source: mcp`. Поддерживают `{{var}}`
-          в строковых значениях — как в шаге `call:`.
+          The MCP call's arguments for `source: mcp`. They support `{{var}}` in
+          string values — as in a `call:` step.
 
-      lang:
-        type: string
+      params:
+        type: object
         description: |
-          Язык для `kind: code` — python | sql | bash | … Даёт линтеру
-          повод проверить синтаксис ДО того, как скилл исполнится в проде.
+          Parameters that only make sense for a SPECIFIC kind: `lang` for code
+          (giving a linter a reason to check syntax before production), `format`
+          for text, a schema for data.
+
+          An open map rather than a set of fields, because kinds are the
+          application's vocabulary (see `kind`): a field per kind would mean the
+          schema grows with every foreign kind while sitting empty on every
+          other asset. That is exactly how `lang` lived here, needed by one kind
+          out of four.
+
+          The engine does not look in here and does not check the shape — it
+          hands this to the application's resolver as is. Contents by kind are
+          in examples/vocabulary.yaml.
 
       deliver:
         type: string
         description: |
-          Маршрут ВЫВОДА инструмента, потребившего ассет: куда деть результат
-          вместо возврата в переменную шага. Имена маршрутов задаёт
-          приложение — схема их не ограничивает (примеры в examples/).
+          The route of the OUTPUT of the tool that consumed the asset: where to
+          put the result instead of returning it into the step's variable. Route
+          names are defined by the application — the schema does not restrict
+          them (examples are in examples/).
 
-          Зачем объявлять здесь, а не решать по ходу: маршрут, который должна
-          выбрать модель, забывается ровно тогда, когда всё остальное уже
-          отработало, — и работа теряется на последнем шаге. Объявленный
-          автором скилла, он применяется детерминированно.
+          Why declare it here rather than decide as you go: a route the model is
+          supposed to choose gets forgotten exactly when everything else has
+          already worked — and the work is lost on the last step. Declared by
+          the skill's author, it is applied deterministically.
 
       fetch:
         $ref: "#/$defs/Fetch"
         description: |
-          Политика получения — применяется, когда содержимое берётся по
-          адресу, а не лежит в скилле.
+          The retrieval policy — applies when the content is taken from an
+          address rather than living in the skill.
 
       validate_with:
         type: string
         description: |
-          Для `kind: config` — имя схемы, которой валидировать
-          содержимое до исполнения. Нужно ли, или достаточно того, что
-          инструмент сам отвергнет плохой конфиг? Отличие в моменте: линтер
-          скажет автору сразу, инструмент — в проде у пользователя.
+          For `kind: config` — the name of the schema to validate the content
+          against before execution. Is it needed, or is it enough that the tool
+          will reject a bad config itself? The difference is in the moment: a
+          linter tells the author right away, a tool tells them in production,
+          at a user's.
 
       description:
         type: string
         description: |
-          Для чего этот ассет — читает ЧЕЛОВЕК, правящий скилл. Особенно нужно
-          внешним ассетам: `content` не виден в файле, и без описания непонятно,
-          что именно приедет по ссылке.
+          What this asset is for — read by the HUMAN editing the skill.
+          Especially needed for external assets: `content` is not visible in the
+          file, and without a description it is unclear what will arrive by the
+          reference.
 
-    # Содержимое либо ЗДЕСЬ, либо ПО АДРЕСУ — ровно одно из двух. Это
-    # единственное, что формат знает об ассете наверняка; какие бывают
-    # источники и требует ли какой-то род ассета дополнительных полей,
-    # решает приложение.
+    # The content is either HERE or AT AN ADDRESS — exactly one of the two. That
+    # is the only thing the format knows about an asset for certain; what
+    # sources exist and whether some kind of asset requires additional fields is
+    # decided by the application.
     oneOf:
       - required: [content]
       - required: [ref]

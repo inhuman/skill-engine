@@ -1,134 +1,210 @@
 # skill-engine
 
-Движок декларативных программ для LLM-агента: скилл описывается **шагами**, и
-управление ходом принадлежит коду, а не модели.
+**English** · [Русский](README.ru.md)
 
-**Зависимостей нет** — боевой код на одной stdlib: движок встраивают в чужое
-приложение, и каждая зависимость здесь стала бы зависимостью встраивающего.
-Разбор YAML передаётся параметром (тип `Unmarshal`), сравнение версий сделано на
-месте. Границу держит тест-страж `imports_test.go`, включая тестовые импорты.
+An engine for declarative programs for an LLM agent: a skill is described in
+**steps**, and control over the turn belongs to the code, not to the model.
+Steps are not the only form: a skill with only a `playbook` (a free-form
+instruction) is a full skill too (see "A prompt works as well").
 
-## Зачем
+**No dependencies** — production code runs on the standard library alone: the
+engine is embedded into someone else's application, and every dependency here
+would become a dependency of the embedder. YAML parsing is passed in as a
+parameter (the `Unmarshal` type), version comparison is implemented in place.
+The boundary is held by a guard test, `imports_test.go`, test imports included.
 
-Ограничение, записанное словами, — просьба: «НЕ вызывай retract без
-подтверждения», «запусти проверку РОВНО один раз». Она соблюдается ровно
-настолько, насколько модель дочитала до неё, прежде чем начать действовать.
-Шагами то же самое выражается структурой: в неподтверждённой ветке вызова
-`retract` **нет**, шаг `call` нельзя повторить, лишняя ветка не исполняется.
+## Why
 
-Замеры на живых скиллах (вызовов инструментов / секунд, до → после):
-построение графика по тикетам 18/95 → **2/6**, список подов кластера 7/33 → **2/5**,
-поиск по вики 9/29 → **5/11**.
+A restriction written in words is a request: "do NOT call retract without
+confirmation", "run the check EXACTLY once". It is followed exactly as far as
+the model read before it started acting. In steps the same thing is expressed
+structurally: in the unconfirmed branch the `retract` call **is not there**, a
+`call` step cannot be repeated, a branch that does not apply does not run.
 
-## Пример
+Measurements on live skills (tool calls / seconds, before → after): plotting a
+chart from tickets 18/95 → **2/6**, listing a cluster's pods 7/33 → **2/5**,
+searching the wiki 9/29 → **5/11**.
+
+## A prompt works as well
+
+Starting with structure is not required. A skill has two ways to describe its
+turn:
+
+- `playbook` — a free-form instruction: what to do and what to look at;
+- `workflow` — steps (`steps`, `tools`, `vars`, `assets`), i.e. everything
+  below in this file.
+
+The usual path is to write it as a prompt, debug it on live requests, and move
+into steps whatever is worth it: structure costs time, and there is no reason
+to pay for it before you know WHAT to structure. The measurements above are
+about that move.
+
+While the move is under way both descriptions can sit side by side, with the
+`mode` field switching between them so their outcomes can be compared on live
+requests — instead of deleting half the work just to check:
+
+| `mode` | `workflow` | `playbook` | what runs |
+|---|---|---|---|
+| unset | present | present | `workflow` — structure outranks prose |
+| unset | present | — | `workflow` |
+| unset | — | present | `playbook` |
+| unset | — | — | error: the skill describes no turn |
+| `workflow` | present | any | `workflow` |
+| `workflow` | — | present | **error**: the mode is set, there are no steps |
+| `playbook` | any | present | `playbook` |
+| `playbook` | present | — | **error**: the mode is set, there is no text |
+
+An empty half under an explicit mode is a refusal, not a fallback to the other
+one: switch the mode to `playbook`, forget to write the text, and you would
+otherwise get a clean run over the old steps and the conclusion "in playbook
+mode it works the same" — from a turn the `playbook` never took part in. The
+first two errors are caught statically by the schema (`if/then` on `mode`); the
+whole table is implemented by `ResolveMode`.
+
+The engine reads only `workflow` — `Flow` has no `playbook` field. A skill
+without steps is run by the embedding application its ordinary way: it is a
+prompt, and the engine has nothing to do there. `ResolveMode` lives here
+because "which of the two descriptions is in effect" is format semantics: were
+it different in every host, skill portability would end silently.
+
+## Example
 
 ```yaml
 tools: [staging, exec]
 steps:
-  - name: understand                  # разбор запроса в поля
+  - name: understand                  # parse the request into fields
     instruction: |
-      Запрос: {{input}}
-      cluster — какой кластер назван; namespace — имя namespace.
-    tools: []                         # шагу инструменты не нужны
+      Request: {{input}}
+      cluster — which cluster is named; namespace — the namespace name.
+    tools: []                         # this step needs no tools
     model: vllm/gemma-4-e4b
     response_schema:
       type: object
       properties:
         cluster: {enum: [staging, sandbox]}
         namespace: {type: string}
-      required: [cluster, namespace]   # см. «Грабли»
+      required: [cluster, namespace]   # see "Format pitfalls"
     save_as: req
 
-  - name: fetch_pods                  # вызов БЕЗ генерации
+  - name: fetch_pods                  # a call WITHOUT generation
     call:
       tool: kubectl_get
       args: {namespace: "{{req.namespace}}", resourceType: pod}
     on_server: "{{req.cluster}}"
     save_as: pods
 
-  - name: report                      # шаг без save_as пишет в ответ хода
+  - name: report                      # a step without save_as writes the turn's answer
     instruction: |
-      Поды: {{pods}}
-      Ответь: имя пода → статус.
+      Pods: {{pods}}
+      Answer: pod name → status.
     tools: []
 ```
 
-## Виды шагов
+## Step kinds
 
-| шаг | что делает |
+| step | what it does |
 |---|---|
-| `instruction` | генерация моделью; `tools` задаёт РАДИУС — пустой список значит «инструментов нет» |
-| `call` | вызов инструмента без генерации; аргументы в YAML |
-| `set` | присвоение переменной |
-| `switch` / `if` | ветвление по значению переменной |
-| `for_each` | цикл по коллекции, `collect` собирает результаты тела |
-| `parallel` | параллельные ветки; `<collect>.skipped` — те, что не пошли по `when` |
-| `delegate` | делегирование другому скиллу (приложение решает, как его исполнить) |
-| `exit` | «сматчено ошибочно» — ход возвращается обычным путём |
+| `instruction` | generation by the model; `tools` sets the RADIUS — an empty list means "no tools" |
+| `call` | a tool call without generation; arguments in YAML |
+| `set` | assigning a variable |
+| `switch` / `if` | branching on a variable's value |
+| `for_each` | a loop over a collection, `collect` gathers the body's results |
+| `parallel` | parallel branches; `<collect>.skipped` — those that did not run because of `when` |
+| `delegate` | delegating to another skill (the application decides how to execute it) |
+| `exit` | "matched by mistake" — the turn returns to its ordinary path |
 
-## Переменные
+## Variables
 
-- `save_as` кладёт результат шага в переменную; **шаг без `save_as` пишет в
-  `answer`** — оттуда приложение берёт ответ хода. Пустой `answer` = программа
-  ответа не дала.
-- `<имя>.mem` — хендл рабочей памяти результата, ВСЕГДА, не только у крупных:
-  `args: {stdin: {from: "{{tickets.mem}}"}}` шлёт данные мимо контекста модели.
-- `{{asset:имя}}` подставляет ассет в ТЕКСТ (проходит через контекст),
-  `{from: "asset:имя"}` — по ССЫЛКЕ (не проходит).
-- `<collect>.skipped` — ветки, пропущенные по `when`. Без этого шаг ответа не
-  отличит «источник ответил пусто» от «в источник не ходили».
+- `save_as` puts a step's result into a variable; **a step without `save_as`
+  writes into `answer`** — that is where the application takes the turn's
+  answer from. An empty `answer` = the program produced no answer.
+- `<name>.mem` — the working-memory handle of a result, ALWAYS, not only for
+  large ones: `args: {stdin: {from: "{{tickets.mem}}"}}` sends the data past
+  the model's context.
+- `{{asset:name}}` substitutes an asset into TEXT (it passes through the
+  context), `{from: "asset:name"}` — by REFERENCE (it does not).
+- `<collect>.skipped` — branches skipped because of `when`. Without it the
+  answering step cannot tell "the source answered nothing" from "we never went
+  to the source".
 
-## Контракт с приложением
+## The contract with the application
 
 ```go
-out, outcome, err := skill-engine.ExecuteWith(ctx, flow, skill-engine.Deps{
-    Runner:   …, // исполняет шаг instruction (генерация)
-    Caller:   …, // исполняет шаг call (инструмент)
-    Delegate: …, // исполняет шаг delegate
+out, outcome, err := skillengine.ExecuteWith(ctx, flow, skillengine.Deps{
+    Runner:   …, // executes an instruction step (generation)
+    Caller:   …, // executes a call step (a tool)
+    Delegate: …, // executes a delegate step
+    Assets:   …, // resolves asset content                    (optional)
+    Memory:   …, // returns a full result by its .mem handle   (optional)
+    OnStep:   …, // a step's trace RIGHT AFTER it, not in bulk (optional)
 }, vars)
 ```
 
-- `Outcome.Steps` — след каждого шага (имя, вид, исход, причина, длительность,
-  число вызовов и отказов);
-- `Outcome.Skipped` — шаги, не исполнённые по `when`;
-- `Outcome.AnsweredBy` — `instruction` или `call`: чем записан ответ. Нужно, чтобы
-  не переписывать постобработкой детерминированный вывод скрипта.
+- `out` — the variables **produced by the steps**; the `vars` passed in do not
+  end up in the result. Otherwise a flow that did not fill in the answer hands
+  the caller its own input — live case: a user got a transcript of their own
+  messages in chat instead of an answer.
+- `Outcome.Steps` — the trace of every step (name, kind, outcome, reason,
+  duration, number of calls and failures);
+- `Outcome.Skipped` — steps not executed because of `when`;
+- `Outcome.AnsweredBy` — `instruction` or `call`: what wrote the answer. Needed
+  so that post-processing does not rewrite a script's deterministic output.
 
-Схема формата — `skill.schema.yaml` (go:embed). Версия движка — `version.go`,
-`CheckEngineVersion` отвергает описание, требующее более новый движок.
+The engine logs nothing, persists nothing and goes nowhere: the input and the
+steps' output are the caller's data. Everything visible from outside is handed
+over as a structure (`Outcome`) and through callbacks (`OnStepStart` — before a
+step, for showing work to a human; `OnStep` — right after). Turning that into
+telemetry is the embedding application's job.
 
-## Инварианты, оплаченные живыми отказами
+The format's schema is `skill.schema.yaml` (go:embed) — the source of truth,
+and the one `SchemaSummary` hands to a model. `skill.schema.ru.yaml` is a
+Russian translation of it: usable for validation, never read by the engine; a
+test keeps the two structurally identical, so only the descriptions differ.
 
-- **Отказ обязан быть громким.** `degraded` ставится шагу без текста, развилке
-  без сработавших веток, `switch` без совпадения при пустом `default`, циклу с
-  отказавшими итерациями, оборванному ответу. Тихий отказ здесь выглядит
-  успехом: ход отвечает служебной переменной, и это читается как готовый ответ.
-- **Механизм, добавленный на путь модели, обязан появиться и на пути `call`.**
-  Девять пропусков подряд, каждый найден живым отказом: пустые аргументы, ссылки
-  `{from:}`, доставка, ретрай, нормализация запроса, провенанс, починка argv,
-  builtin-тулы, cross-turn память.
-- **Знание дорого в шаге С ИНСТРУМЕНТАМИ**: ассет едет в КАЖДУЮ генерацию
-  react-цикла. Лечится разбиением на «решить» (знание, без тулов) и «выполнить»
-  (тулы, без знания).
+The format version is in `version.go`; `CheckEngineVersion` rejects both a
+description from the future and one of a foreign major: the latter would parse
+without a single complaint, silently losing fields the structs no longer have.
+Format changes are in `CHANGELOG.md`.
 
-## Грабли формата
+## Invariants paid for with live failures
 
-- **`required` — единственный рычаг.** `strict`-схема принуждает только к
-  перечисленному: поле в `properties` мимо `required` модель законно не
-  пришлёт. Живой замер: `confidence` не пришёл НИ РАЗУ из 26 находок, зато 16
-  написали цифру словами внутри текста.
-- **Строковому полю нужен `maxLength`.** Иначе модель расписывается до потолка
-  токенов и обрывается посреди строки, утаскивая весь документ. Грамматика
-  ограничение держит: `maxLength: 600` → ровно 600 символов и валидный JSON.
-- **`for_each.in` берёт ИМЯ переменной, не шаблон.** `in: "{{parts}}"` даёт ноль
-  итераций и отчитывается успехом (движок теперь такое отвергает).
-- **Конверт exec — не полезная нагрузка.** `{{findings}}` это
-  `{"exit_code":…,"stdout":"…"}`; циклу и аргументам нужен `.stdout`.
+- **A failure must be loud.** `degraded` is set on a step with no text, on a
+  fork where no branch ran, on a `switch` with no match and an empty `default`,
+  on a loop with failed iterations, on a truncated answer. A silent failure
+  here looks like success: the turn answers with an internal variable, and that
+  reads as a finished answer.
+- **A mechanism added to the model's path must appear on the `call` path too.**
+  Nine misses in a row, each found by a live failure: empty arguments, `{from:}`
+  references, delivery, retries, request normalisation, provenance, argv
+  repair, builtin tools, cross-turn memory.
+- **Knowledge is expensive in a step WITH TOOLS**: an asset rides along into
+  EVERY generation of the react loop. The cure is splitting it into "decide"
+  (knowledge, no tools) and "do" (tools, no knowledge).
 
-Проверять описания статикой стоит до запуска: стыки шагов — то место, где
-программы ломаются, и линтер ловит их дешевле прогона.
+## Format pitfalls
 
-## Тесты
+- **`required` is the only lever.** A `strict` schema enforces only what is
+  listed: a field in `properties` but not in `required` may legitimately not be
+  sent by the model. Live measurement: `confidence` did not arrive ONCE out of
+  26 findings, while 16 of them wrote the number in words inside the text.
+- **A string field needs `maxLength`.** Otherwise the model writes until the
+  token ceiling and breaks off mid-line, taking the whole document with it. The
+  grammar holds the limit: `maxLength: 600` → exactly 600 characters and valid
+  JSON.
+- **`for_each.in` takes a variable NAME, not a template.** `in: "{{parts}}"`
+  yields zero iterations and reports success (the engine now rejects that).
+- **The exec envelope is not the payload.** `{{findings}}` is
+  `{"exit_code":…,"stdout":"…"}`; a loop and the arguments need `.stdout`.
 
-`example_flow_test.go` и `example_composite_test.go` — исполняемые примеры
-формата, годятся как первая точка входа.
+The joints between steps are where programs break, and static checks catch them
+more cheaply than a run does. `Flow.Validate` is called before execution and
+rejects what used to be reported as success; every new such class is closed off
+by a check in validation rather than by a paragraph here. Running it over
+descriptions before execution is worth it too — in CI, when a skill is written.
+
+## Tests
+
+`example_flow_test.go` — runnable examples of the format, a good first entry
+point. `examples_test.go` parses every file from `examples/` with the engine: an
+example that stopped parsing is worse than a missing one — it teaches the wrong
+thing.

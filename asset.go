@@ -7,104 +7,119 @@ import (
 	"time"
 )
 
-// Ассеты — именованные нагрузки, которые скилл передаёт инструменту ПО ССЫЛКЕ,
-// не пропуская через контекст модели.
+// Assets are named payloads a skill hands to a tool BY REFERENCE, without
+// passing them through the model's context.
 //
-// Зачем: модель не может точно воспроизвести многокилобайтный литерал через
-// аргумент инструмента — она его РЕГЕНЕРИРУЕТ и портит (живой отказ: шесть
-// SyntaxError подряд на скрипте рендера, потом захардкоженная сдача).
+// Why: a model cannot reproduce a multi-kilobyte literal verbatim through a
+// tool argument — it REGENERATES and corrupts it (live failure: six
+// SyntaxErrors in a row on a rendering script, then a hardcoded surrender).
 //
-// Описываются ДВУМЯ независимыми осями. Их намеренно не сводят в один
-// перечень: иначе получится комбинаторика (code_inline, code_repo, config_mcp…),
-// и каждый новый источник потребует столько значений, сколько есть видов.
+// Described along TWO independent axes. They are deliberately not collapsed
+// into one enum: that would give combinatorics (code_inline, code_repo,
+// config_mcp…), and every new source would need as many values as there are
+// kinds.
 
-// Род ассета, источник и маршрут доставки — СЛОВАРЬ ПРИЛОЖЕНИЯ, не движка.
+// The asset kind, its source and its delivery route are the APPLICATION's
+// vocabulary, not the engine's.
 //
-// Движок не знает, какие бывают роды нагрузки, откуда её берут и куда девают
-// вывод. Знает он одно: содержимое либо лежит здесь, либо доступно по адресу.
-// Всё остальное разбирает резолвер встраивающего приложения — поэтому в
-// объявлении просто строки, а не перечисления.
+// The engine does not know what kinds of payload exist, where they are taken
+// from, or where the output goes. It knows one thing: the content is either
+// right here or reachable at an address. Everything else is handled by the
+// embedder's resolver — hence plain strings in the declaration rather than
+// enums.
 
-// Asset — объявление нагрузки в описании скилла.
+// Asset — a payload declared in a skill.
 type Asset struct {
 	Kind   string `yaml:"kind,omitempty"`
 	Source string `yaml:"source,omitempty"`
-	// Content — содержимое для source: inline.
+	// Content — the content itself, for source: inline.
 	Content string `yaml:"content,omitempty"`
-	// Ref — адрес для внешних источников: «проект@ветка:путь» | «путь в
-	// хранилище файлов» | «сервер:инструмент».
+	// Ref — the address for external sources: "project@branch:path" |
+	// "path in file storage" | "server:tool".
 	Ref string `yaml:"ref,omitempty"`
-	// Args — аргументы MCP-вызова для source: mcp. Поддерживают {{var}}.
+	// Args — MCP call arguments for source: mcp. They support {{var}}.
 	Args map[string]any `yaml:"args,omitempty"`
-	// Lang — язык для kind: code (python|sql|bash…). Даёт линтеру повод
-	// проверить синтаксис ДО того, как скилл исполнится в проде.
-	Lang string `yaml:"lang,omitempty"`
-	// Deliver — куда девать ВЫВОД инструмента, потребившего ассет:
-	// reply — вывод становится ответом хода; file — доставляется файлом;
-	// пусто — возвращается шагу.
+	// Params — whatever only makes sense for a SPECIFIC kind: the language for
+	// code (giving a linter a reason to check syntax before production), the
+	// format for text, the schema for data.
 	//
-	// Существует потому, что модель забывает прикрепить хрупкий аргумент
-	// доставки (живой отказ: рендер отработал, а файл пользователю не
-	// уехал). Автор скилла объявляет маршрут, мост фиксирует его сам.
+	// A map rather than struct fields, because kinds are the APPLICATION's
+	// vocabulary and the engine does not know them (see Kind above). A field
+	// per kind would mean the library grows with every foreign kind while
+	// sitting empty on every other asset: that is exactly how `lang` lived
+	// here, needed by one kind out of four.
+	//
+	// The engine does not look inside and does not check the shape — it hands
+	// this to the resolver as is.
+	Params map[string]any `yaml:"params,omitempty"`
+	// Deliver — where the OUTPUT of the tool that consumed the asset goes:
+	// reply — the output becomes the turn's answer; file — delivered as a
+	// file; empty — returned to the step.
+	//
+	// It exists because the model forgets to attach the fragile delivery
+	// argument (live failure: the render worked, the file never reached the
+	// user). The skill author declares the route, the bridge pins it down.
 	Deliver string `yaml:"deliver,omitempty"`
-	// Description — для чего ассет; читает ЧЕЛОВЕК, правящий скилл. Особенно
-	// нужно внешним: содержимое не видно в файле.
+	// Description — what the asset is for; read by the HUMAN editing the
+	// skill. Especially needed for external ones: their content is not visible
+	// in the file.
 	Description string `yaml:"description,omitempty"`
-	// Fetch — политика получения для внешних источников.
+	// Fetch — the retrieval policy for external sources.
 	Fetch *Fetch `yaml:"fetch,omitempty"`
 }
 
-// Fetch — как тянуть внешний ассет.
+// Fetch — how an external asset is retrieved.
 //
-// Внешний ассет тянется В ХОДЕ, а не из периодического кеша: смысл внешнего
-// источника — свежесть. Вики-страница правится, список сервисов меняется;
-// отдать вчерашнюю копию значит отменить причину, по которой ассет сделали
-// внешним. Цена — сеть в горячем пути, и лечится она этой политикой, а не
-// запретом.
+// An external asset is fetched DURING the turn rather than from a periodic
+// cache: the point of an external source is freshness. A wiki page gets
+// edited, a service list changes; handing out yesterday's copy cancels the
+// reason the asset was made external. The cost is network on the hot path, and
+// it is treated with this policy rather than a ban.
 type Fetch struct {
-	// TTL — сколько содержимое считается свежим. Пусто/0 — тянуть каждый раз.
+	// TTL — how long the content counts as fresh. Empty/0 — fetch every time.
 	TTL time.Duration `yaml:"ttl,omitempty"`
-	// Timeout — потолок на ОДНУ попытку. Ход не должен висеть на чужой
-	// недоступности.
+	// Timeout — the ceiling on ONE attempt. A turn must not hang on someone
+	// else's downtime.
 	Timeout time.Duration `yaml:"timeout,omitempty"`
-	// Retries — повторы сверх первой попытки, с экспоненциальной паузой.
-	// Повторяется только transient: повтор на 404 исход не изменит.
+	// Retries — retries beyond the first attempt, with exponential backoff.
+	// Only transient failures are retried: retrying a 404 will not change the
+	// outcome.
 	Retries int `yaml:"retries,omitempty"`
-	// OnUnavailable — что делать, когда достать не удалось:
-	// fail (умолчание) | stale — прошлая копия | empty — пустота.
+	// OnUnavailable — what to do when retrieval failed:
+	// fail (default) | stale — the previous copy | empty — nothing.
 	OnUnavailable string `yaml:"on_unavailable,omitempty"`
 }
 
-// AssetResolver достаёт содержимое ассета. Домен (репозитории, хранилище файлов,
-// MCP) живёт за интерфейсом — движок про них не знает.
+// AssetResolver fetches an asset's content. The domain (repositories, file
+// storage, MCP) lives behind the interface — the engine knows nothing of it.
 type AssetResolver interface {
 	Resolve(ctx context.Context, name string, a Asset) (string, error)
 }
 
-// validateAssets проверяет объявления до исполнения: связки полей и то, что
-// ссылка ведёт хоть куда-то.
+// validateAssets checks declarations before execution: field pairings and that
+// the reference leads somewhere at all.
 func validateAssets(assets map[string]Asset) error {
 	for name, a := range assets {
 		hasContent := strings.TrimSpace(a.Content) != ""
 		hasRef := strings.TrimSpace(a.Ref) != ""
 		switch {
 		case !hasContent && !hasRef:
-			return fmt.Errorf("ассет %q: нет ни content, ни ref — нечего исполнять", name)
+			return fmt.Errorf("asset %q: neither content nor ref — nothing to execute", name)
 		case hasContent && hasRef:
-			return fmt.Errorf("ассет %q: заданы и content, и ref — непонятно, что брать", name)
+			return fmt.Errorf("asset %q: both content and ref set — unclear which to take", name)
 		}
 		if a.Fetch != nil {
 			switch a.Fetch.OnUnavailable {
 			case "", "fail", "stale", "empty":
 			default:
-				return fmt.Errorf("ассет %q: неизвестный on_unavailable %q", name, a.Fetch.OnUnavailable)
+				return fmt.Errorf("asset %q: unknown on_unavailable %q", name, a.Fetch.OnUnavailable)
 			}
 		}
 	}
 	return nil
 }
 
-// AssetRefsInText перечисляет ассеты, подставляемые в текст ({{asset:имя}}).
+// AssetRefsInText lists assets substituted into text ({{asset:name}}).
 func AssetRefsInText(text string) []string {
 	matches := assetRe.FindAllStringSubmatch(text, -1)
 	out := make([]string, 0, len(matches))
@@ -114,9 +129,9 @@ func AssetRefsInText(text string) []string {
 	return out
 }
 
-// AssetRefsInArgs перечисляет ассеты, передаваемые по ссылке ({from: "asset:имя"}) —
-// то есть мимо контекста модели. Разница с AssetRefsInText не стилистическая:
-// от неё зависит, увидит ли модель содержимое.
+// AssetRefsInArgs lists assets passed by reference ({from: "asset:name"}) —
+// that is, past the model's context. The difference from AssetRefsInText is
+// not stylistic: it decides whether the model sees the content.
 func AssetRefsInArgs(args map[string]any) []string {
 	var out []string
 	var walk func(v any)

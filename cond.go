@@ -1,7 +1,6 @@
 package skillengine
 
-// Условия ветвления: `var == значение`, `var != значение`,
-// `var is [not] empty`.
+// Branch conditions: `var == value`, `var != value`, `var is [not] empty`.
 
 import (
 	"fmt"
@@ -11,24 +10,25 @@ import (
 
 var condRe = regexp.MustCompile(`^\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*(==|!=)\s*(.*?)\s*$`)
 
-// emptyCondRe — условие «шаг не дал результата»: `var is empty` / `var is not empty`.
+// emptyCondRe — the "step produced nothing" condition: `var is empty` /
+// `var is not empty`.
 //
-// Зачем отдельная форма, а не сравнение с "". Шаг, отработавший неудачно, кладёт
-// в переменную не пустоту, а помеченный отказ (ERROR:/DENIED:) — различать их
-// нужно ПОЛИТИКЕ, но ветвлению «не нашли — ищем иначе» они оба означают одно.
-// Этот паттерн встретился трижды в одном живом описании, а повторение в трёх
-// местах — признак, что смысл принадлежит движку, а не описанию (то же
-// рассуждение, что и у ErrorPolicy).
+// Why a dedicated form instead of comparing against "". A step that failed
+// stores a marked failure (ERROR:/DENIED:), not an empty string — the POLICY
+// needs to tell those apart, but to a "nothing found, try another way" branch
+// they mean the same. This pattern showed up three times in a single live
+// skill, and a meaning repeated in three places belongs to the engine rather
+// than to the skill (same reasoning as ErrorPolicy).
 var emptyCondRe = regexp.MustCompile(`^\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s+is\s+(not\s+)?empty\s*$`)
 
-// isBlank — «шаг не дал полезного результата»: пусто или отказ.
+// isBlank — "the step produced nothing useful": empty or a failure marker.
 func isBlank(v string) bool {
 	t := strings.TrimSpace(v)
 	return t == "" || strings.HasPrefix(t, "ERROR:") || strings.HasPrefix(t, "DENIED:")
 }
 
-// parseCond разбирает условие вида `var == value` / `var != value`.
-// Значение может быть пустым (`var == `) — так проверяется незаполненность.
+// parseCond parses a condition of the form `var == value` / `var != value`.
+// The value may be empty (`var == `) — that tests for an unfilled variable.
 func parseCond(cond string) (name, op, want string, err error) {
 	if m := emptyCondRe.FindStringSubmatch(cond); m != nil {
 		op = "is empty"
@@ -39,7 +39,7 @@ func parseCond(cond string) (name, op, want string, err error) {
 	}
 	m := condRe.FindStringSubmatch(cond)
 	if m == nil {
-		return "", "", "", fmt.Errorf("условие %q: ожидается «var == значение», «var != значение» или «var is [not] empty»", cond)
+		return "", "", "", fmt.Errorf("condition %q: want `var == value`, `var != value` or `var is [not] empty`", cond)
 	}
 	return m[1], m[2], strings.Trim(m[3], `"'`), nil
 }

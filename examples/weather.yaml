@@ -1,13 +1,13 @@
-# Погода через браузер: сходить на страницу, снять число, ответить.
+# Weather through a browser: visit a page, take the number, answer.
 #
-# Показывает: шаг `call` без генерации (адрес известен, модели там делать
-# нечего) и разделение «решить» / «выполнить» — разбор запроса идёт БЕЗ
-# инструментов, браузер достаётся только шагу, которому он нужен.
+# Shows: a `call` step without generation (the address is known, the model has
+# nothing to do there) and the "decide" / "do" split — parsing the request runs
+# WITHOUT tools, and the browser is handed only to the step that needs it.
 
-skill_engine_version: "1.0.0"
+skill_engine_version: "2.0.0"
 skill_version: "1.0.0"
 name: weather
-description: Сказать погоду в названном городе.
+description: Tell the weather in the named city.
 role: reader
 kind: leaf
 
@@ -18,13 +18,14 @@ workflow:
   steps:
     - name: understand
       instruction: |
-        Запрос: {{input}}
+        Request: {{input}}
 
-        city — город на латинице, как он пишется в адресе сайта погоды
-        (Москва → moscow, Санкт-Петербург → saint-petersburg).
+        city — the city as it is spelled in the weather site's URL
+        (New York → new-york, Saint Petersburg → saint-petersburg).
       tools: []
       sampling:
         temperature: 0
+      model: vllm/gemma-4-e4b       # a response_schema without a model choice = a silent hole
       response_schema:
         type: object
         properties:
@@ -41,9 +42,9 @@ workflow:
 
     - name: answer
       instruction: |
-        Страница погоды для {{req.city}}:
+        The weather page for {{req.city}}:
         {{page}}
 
-        Ответь одной фразой: температура сейчас и что на небе. Числа бери
-        только со страницы; не нашёл — так и скажи.
+        Answer in one phrase: the temperature now and what the sky is doing.
+        Take numbers only from the page; if you did not find them, say so.
       tools: []

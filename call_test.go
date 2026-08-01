@@ -24,7 +24,7 @@ func (c *recordingCaller) CallTool(_ context.Context, server, tool string, args 
 	return c.out, c.err
 }
 
-// seqCaller отдаёт заготовленные ответы по порядку и запоминает аргументы.
+// seqCaller returns prepared answers in order and remembers the arguments.
 type seqCaller struct {
 	outs []string
 	seen []map[string]any
@@ -45,9 +45,9 @@ func parseFlow(t *testing.T, src string) *Flow {
 	return &f
 }
 
-// Шаг call не тратит ни одной генерации: исполнителя шагов тут нет вовсе.
+// A call step spends no generations at all: there is no step executor here.
 func TestCallStepNeedsNoModel(t *testing.T) {
-	c := &recordingCaller{out: "строки схемы"}
+	c := &recordingCaller{out: "schema lines"}
 	f := parseFlow(t, `
 tools: ["srv"]
 steps:
@@ -61,17 +61,17 @@ steps:
 `)
 	vars, _, err := ExecuteWith(context.Background(), f, Deps{Caller: c}, map[string]string{"resource": "t1_vpc_vip"})
 	require.NoError(t, err)
-	assert.Equal(t, "строки схемы", vars["schema"])
+	assert.Equal(t, "schema lines", vars["schema"])
 	assert.Equal(t, 1, c.calls)
 	assert.Equal(t, "srv", c.server)
 	assert.Equal(t, "search_code", c.tool)
-	assert.Equal(t, "t1_vpc_vip", c.args["search"], "{{var}} подставлена")
-	assert.Equal(t, "iac/provider", c.args["project_id"], "литерал не тронут")
+	assert.Equal(t, "t1_vpc_vip", c.args["search"], "{{var}} was substituted")
+	assert.Equal(t, "iac/provider", c.args["project_id"], "the literal was left alone")
 }
 
-// Главное свойство: описание не может обойти собственное сужение серверов.
+// The main property: a skill cannot go around its own narrowing of servers.
 func TestCallStepCannotEscapeFlowTools(t *testing.T) {
-	c := &recordingCaller{out: "не должно случиться"}
+	c := &recordingCaller{out: "must not happen"}
 	f := parseFlow(t, `
 tools: ["srv-dev"]
 steps:
@@ -83,11 +83,11 @@ steps:
 	_, _, err := ExecuteWith(context.Background(), f, Deps{Caller: c}, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "srv-prod")
-	assert.Zero(t, c.calls, "до вызова дело не дошло")
+	assert.Zero(t, c.calls, "it never got as far as the call")
 }
 
-// Аргументы могут быть вложенными; подстановка идёт только в строки, форма
-// вызова и типы остаются как записаны.
+// Arguments may be nested; substitution applies to strings only, the call's
+// shape and types stay as written.
 func TestCallStepExpandsNestedArgsOnly(t *testing.T) {
 	c := &recordingCaller{}
 	f := parseFlow(t, `
@@ -126,16 +126,16 @@ steps:
 `)
 	c := &recordingCaller{err: errors.New("upstream 500")}
 	vars, _, err := ExecuteWith(context.Background(), f, Deps{Caller: c}, nil)
-	require.NoError(t, err, "continue не роняет поток")
+	require.NoError(t, err, "continue does not bring the flow down")
 	assert.Contains(t, vars["schema"], "ERROR")
-	assert.Equal(t, 2, c.calls, "поток дошёл до следующего шага")
+	assert.Equal(t, 2, c.calls, "the flow reached the next step")
 
 	c = &recordingCaller{err: ErrDenied}
 	vars, _, _ = ExecuteWith(context.Background(), f, Deps{Caller: c}, nil)
-	assert.Contains(t, vars["schema"], "DENIED", "отказ по правам отличим от сбоя")
+	assert.Contains(t, vars["schema"], "DENIED", "a permission refusal is distinguishable from a breakage")
 }
 
-// Без исполнителя вызовов шаг обязан отказать внятно, а не молча пропустить.
+// Without a call executor the step must refuse clearly rather than silently skip.
 func TestCallStepWithoutCaller(t *testing.T) {
 	f := parseFlow(t, `
 tools: ["srv"]
@@ -153,16 +153,16 @@ steps:
 func TestCallStepValidation(t *testing.T) {
 	_, _, err := ExecuteWith(context.Background(), parseFlow(t, "tools: [\"srv\"]\nsteps:\n  - call:\n      tool: no_colon_here\n"), Deps{}, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "сервер:инструмент")
+	assert.Contains(t, err.Error(), `want "server:tool"`)
 
 	server, tool, ok := SplitToolRef("srv:ns:tool")
 	assert.True(t, ok)
 	assert.Equal(t, "srv", server)
-	assert.Equal(t, "ns:tool", tool, "разделитель — первое двоеточие")
+	assert.Equal(t, "ns:tool", tool, "the separator is the first colon")
 }
 
-// «Шаг не дал результата» обязано покрывать и пустоту, и помеченный отказ:
-// ветвлению «не нашли — ищем иначе» они означают одно и то же.
+// "The step produced no result" must cover both emptiness and a marked failure:
+// to a "nothing found, try another way" branch they mean the same thing.
 func TestIsEmptyCondition(t *testing.T) {
 	f := parseFlow(t, `
 steps:
@@ -172,21 +172,21 @@ steps:
         - set: {var: took_fallback, value: "yes"}
 `)
 	for name, v := range map[string]string{
-		"пусто":      "",
-		"пробелы":    "   ",
-		"сбой":       "ERROR: upstream 500",
-		"отказ прав": "DENIED: skill-engine: denied",
+		"empty":              "",
+		"whitespace":         "   ",
+		"breakage":           "ERROR: upstream 500",
+		"permission refusal": "DENIED: skill-engine: denied",
 	} {
 		t.Run(name, func(t *testing.T) {
 			vars, _, err := ExecuteWith(context.Background(), f, Deps{}, map[string]string{"schema": v})
 			require.NoError(t, err)
-			assert.Equal(t, "yes", vars["took_fallback"], "запасной путь выбран")
+			assert.Equal(t, "yes", vars["took_fallback"], "the fallback path was taken")
 		})
 	}
 
-	vars, _, err := ExecuteWith(context.Background(), f, Deps{}, map[string]string{"schema": "строки схемы"})
+	vars, _, err := ExecuteWith(context.Background(), f, Deps{}, map[string]string{"schema": "schema lines"})
 	require.NoError(t, err)
-	assert.Empty(t, vars["took_fallback"], "результат есть — запасной путь не нужен")
+	assert.Empty(t, vars["took_fallback"], "there is a result — no fallback needed")
 }
 
 func TestIsNotEmptyCondition(t *testing.T) {
@@ -197,47 +197,48 @@ steps:
       then:
         - set: {var: used, value: "yes"}
 `)
-	vars, _, err := ExecuteWith(context.Background(), f, Deps{}, map[string]string{"schema": "строки"})
+	vars, _, err := ExecuteWith(context.Background(), f, Deps{}, map[string]string{"schema": "lines"})
 	require.NoError(t, err)
 	assert.Equal(t, "yes", vars["used"])
 
-	vars, _, err = ExecuteWith(context.Background(), f, Deps{}, map[string]string{"schema": "ERROR: нет"})
+	vars, _, err = ExecuteWith(context.Background(), f, Deps{}, map[string]string{"schema": "ERROR: nope"})
 	require.NoError(t, err)
 	assert.Empty(t, vars["used"])
 }
 
-// Поток отдаёт РЕЗУЛЬТАТ, а не то, что ему подали на вход. Иначе вызывающий,
-// ищущий «самую содержательную переменную», находит поданную историю разговора.
+// A flow returns its RESULT, not what it was given as input. Otherwise a caller
+// looking for "the most substantial variable" finds the conversation history it
+// passed in.
 func TestExecuteReturnsOnlyProduced(t *testing.T) {
 	f := parseFlow(t, `
 steps:
-  - set: {var: answer, value: "готово"}
+  - set: {var: answer, value: "done"}
 `)
 	in := map[string]string{
-		"input":   "вопрос пользователя",
-		"history": "длинная-предлинная история разговора, которая длиннее любого ответа",
+		"input":   "the user's question",
+		"history": "a very, very long conversation history, longer than any answer",
 	}
 	got, _, err := ExecuteWith(context.Background(), f, Deps{}, in)
 	require.NoError(t, err)
-	assert.Equal(t, map[string]string{"answer": "готово"}, got,
-		"входные переменные не результат потока")
+	assert.Equal(t, map[string]string{"answer": "done"}, got,
+		"input variables are not the flow's result")
 }
 
-// Шаг, перезаписавший входную переменную, ЕЁ ПРОИЗВЁЛ — она результат.
+// A step that overwrote an input variable PRODUCED it — it is a result.
 func TestExecuteStepOverwriteCountsAsProduced(t *testing.T) {
 	f := parseFlow(t, `
 steps:
-  - set: {var: input, value: "переписано шагом"}
+  - set: {var: input, value: "rewritten by the step"}
 `)
-	got, _, err := ExecuteWith(context.Background(), f, Deps{}, map[string]string{"input": "исходное"})
+	got, _, err := ExecuteWith(context.Background(), f, Deps{}, map[string]string{"input": "original"})
 	require.NoError(t, err)
-	assert.Equal(t, "переписано шагом", got["input"])
+	assert.Equal(t, "rewritten by the step", got["input"])
 }
 
-// Поток без единого сервера НЕ разрешает всё: иначе скилл без `servers`
-// (поле опционально) дотянется до write-инструментов.
+// A flow without a single server does NOT allow everything: otherwise a skill
+// with no `servers` (the field is optional) would reach write tools.
 func TestCallStepDeniedWhenFlowHasNoServers(t *testing.T) {
-	c := &recordingCaller{out: "не должно случиться"}
+	c := &recordingCaller{out: "must not happen"}
 	f := parseFlow(t, `
 steps:
   - name: sneaky
@@ -247,13 +248,14 @@ steps:
 `)
 	_, _, err := ExecuteWith(context.Background(), f, Deps{Caller: c}, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "не объявлено ни одного сервера")
-	assert.Zero(t, c.calls, "до вызова дело не дошло")
+	assert.Contains(t, err.Error(), "declares no servers")
+	assert.Zero(t, c.calls, "it never got as far as the call")
 }
 
-// `when` — условие применимости шага: ложно → шаг не исполняется вовсе.
+// `when` is a step's applicability condition: false → the step does not run at
+// all.
 func TestWhenSkipsStep(t *testing.T) {
-	c := &recordingCaller{out: "не должно случиться"}
+	c := &recordingCaller{out: "must not happen"}
 	f := parseFlow(t, `
 tools: ["srv"]
 steps:
@@ -262,18 +264,18 @@ steps:
     call:
       tool: srv:tool
       save_as: out
-  - set: {var: done, value: "конец"}
+  - set: {var: done, value: "the end"}
 `)
 	vars, outcome, err := ExecuteWith(context.Background(), f, Deps{Caller: c}, map[string]string{"found": "no"})
 	require.NoError(t, err)
-	assert.Zero(t, c.calls, "шаг не исполнялся")
-	assert.Equal(t, "конец", vars["done"], "поток пошёл дальше")
+	assert.Zero(t, c.calls, "the step did not run")
+	assert.Equal(t, "the end", vars["done"], "the flow moved on")
 	assert.Equal(t, []string{"only_if_found"}, outcome.Skipped,
-		"пропуск ВИДЕН: иначе частичное совпадение задачи снова незаметно")
+		"the skip is VISIBLE: otherwise a partial match of the task goes unnoticed again")
 }
 
 func TestWhenRunsStepWhenTrue(t *testing.T) {
-	c := &recordingCaller{out: "данные"}
+	c := &recordingCaller{out: "data"}
 	f := parseFlow(t, `
 tools: ["srv"]
 steps:
@@ -283,47 +285,47 @@ steps:
       tool: srv:tool
       save_as: out
 `)
-	vars, outcome, err := ExecuteWith(context.Background(), f, Deps{Caller: c}, map[string]string{"found": "да"})
+	vars, outcome, err := ExecuteWith(context.Background(), f, Deps{Caller: c}, map[string]string{"found": "yes"})
 	require.NoError(t, err)
 	assert.Equal(t, 1, c.calls)
-	assert.Equal(t, "данные", vars["out"])
+	assert.Equal(t, "data", vars["out"])
 	assert.Empty(t, outcome.Skipped)
 }
 
-// Шаг exit прекращает поток особой ошибкой: вызывающий обязан отличить её от
-// сбоя — реакция противоположная.
+// An exit step stops the flow with a special error: the caller must tell it from
+// a failure — the reaction is the opposite.
 func TestExitStopsFlow(t *testing.T) {
 	f := parseFlow(t, `
 steps:
   - name: guard
-    exit: {reason: "не мой случай: {{kind}}"}
-  - set: {var: unreachable, value: "нет"}
+    exit: {reason: "not my case: {{kind}}"}
+  - set: {var: unreachable, value: "no"}
 `)
-	vars, _, err := ExecuteWith(context.Background(), f, Deps{}, map[string]string{"kind": "разговор"})
+	vars, _, err := ExecuteWith(context.Background(), f, Deps{}, map[string]string{"kind": "small talk"})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrExit)
 
 	var ee *ExitError
 	require.ErrorAs(t, err, &ee)
-	assert.Equal(t, "не мой случай: разговор", ee.Reason, "причина с подстановкой")
-	assert.Empty(t, vars["unreachable"], "шаги после exit не исполняются")
+	assert.Equal(t, "not my case: small talk", ee.Reason, "the reason went through substitution")
+	assert.Empty(t, vars["unreachable"], "steps after exit do not run")
 }
 
 func TestWhenBadConditionRejectedByValidate(t *testing.T) {
 	_, _, err := ExecuteWith(context.Background(), parseFlow(t, `
 steps:
   - name: x
-    when: "мусор без оператора"
+    when: "garbage without an operator"
     set: {var: a, value: b}
 `), Deps{}, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "when")
 }
 
-// on_server: сервер вычисляется на исполнении — 14 из 28 скиллов несут
-// варианты одного сервера, и без этого каждому нужен switch из 2–5 веток.
+// on_server: the server is computed at execution time — 14 of 28 skills carry
+// variants of one server, and without this each needs a switch of 2–5 branches.
 func TestOnServerPicksServerAtRuntime(t *testing.T) {
-	c := &recordingCaller{out: "логи"}
+	c := &recordingCaller{out: "logs"}
 	f := parseFlow(t, `
 tools: ["staging", "prod"]
 steps:
@@ -336,12 +338,12 @@ steps:
 `)
 	_, _, err := ExecuteWith(context.Background(), f, Deps{Caller: c}, map[string]string{"cluster": "prod"})
 	require.NoError(t, err)
-	assert.Equal(t, "prod", c.server, "вызов ушёл на вычисленный сервер")
+	assert.Equal(t, "prod", c.server, "the call went to the computed server")
 	assert.Equal(t, "get_logs", c.tool)
 }
 
-// Вычисленное имя проходит ТУ ЖЕ проверку набора: подстановка не расширяет
-// радиус доступа.
+// The computed name goes through THE SAME set check: substitution does not widen
+// the access radius.
 func TestOnServerCannotEscapeFlowTools(t *testing.T) {
 	c := &recordingCaller{}
 	f := parseFlow(t, `
@@ -359,7 +361,7 @@ steps:
 	assert.Zero(t, c.calls)
 }
 
-// Для шага-МОДЕЛИ on_server сужает набор инструментов до одного сервера.
+// For a MODEL step on_server narrows the tool set down to a single server.
 func TestOnServerNarrowsModelStepTools(t *testing.T) {
 	r := &fakeRunner{}
 	f := parseFlow(t, `
@@ -367,19 +369,19 @@ tools: ["staging", "prod", "sandbox"]
 steps:
   - name: pick
     on_server: "{{cluster}}"
-    instruction: "найди под"
+    instruction: "find the pod"
     save_as: pod
 `)
 	_, _, err := ExecuteWith(context.Background(), f, Deps{Runner: r}, map[string]string{"cluster": "sandbox"})
 	require.NoError(t, err)
 	require.Len(t, r.seen, 1)
 	assert.Equal(t, []string{"sandbox"}, r.seen[0].Tools,
-		"модель видит инструменты ОДНОГО кластера, а не всех трёх")
+		"the model sees the tools of ONE cluster, not of all three")
 }
 
-// Хендл рабочей памяти доезжает до следующего шага: без него программа может
-// работать только с тем, что влезло в превью, а большие выборки (полный json
-// подов кластера) пришлось бы гнать через контекст модели.
+// The working-memory handle reaches the next step: without it a program can only
+// work with what fitted into the preview, and large fetches (the full json of a
+// cluster's pods) would have to be pushed through the model's context.
 func TestCallStepExposesMemHandle(t *testing.T) {
 	f := parseFlow(t, `
 tools: ["srv"]
@@ -396,21 +398,22 @@ steps:
     save_as: out
 `)
 	c := &seqCaller{outs: []string{
-		"превью…\n[mem:podsjson-a1b2 — это ПРЕВЬЮ, всего 812kb]",
-		"готово",
+		"preview…\n[mem:podsjson-a1b2 — this is a PREVIEW, 812kb in total]",
+		"done",
 	}}
 	_, _, err := ExecuteWith(context.Background(), f, Deps{Caller: c}, nil)
 	require.NoError(t, err)
 
 	require.Len(t, c.seen, 2)
 	stdin, ok := c.seen[1]["stdin"].(map[string]any)
-	require.True(t, ok, "stdin не объект: %#v", c.seen[1])
-	assert.Equal(t, "podsjson-a1b2", stdin["from"], "хендл не подставился")
+	require.True(t, ok, "stdin is not an object: %#v", c.seen[1])
+	assert.Equal(t, "podsjson-a1b2", stdin["from"], "the handle was not substituted")
 }
 
-// save_as рядом с call (а не внутри) — то, как его пишет автор: у шага модели
-// оно живёт именно там. Молчаливая потеря стоила судье поисковый скилл вердикта по
-// пустому списку, поэтому поле принимается на обоих уровнях.
+// save_as next to call (rather than inside it) is how an author writes it: on a
+// model step that is exactly where it lives. Losing it silently cost a judging
+// search skill a verdict passed on an empty list, so the field is accepted at
+// both levels.
 func TestCallStepAcceptsStepLevelSaveAs(t *testing.T) {
 	f := parseFlow(t, `
 tools: ["srv"]
@@ -422,14 +425,14 @@ steps:
     save_as: hits
 `)
 	require.NoError(t, f.Validate())
-	c := &seqCaller{outs: []string{"строки выдачи"}}
+	c := &seqCaller{outs: []string{"result lines"}}
 	vars, _, err := ExecuteWith(context.Background(), f, Deps{Caller: c}, nil)
 	require.NoError(t, err)
-	assert.Equal(t, "строки выдачи", vars["hits"], "результат call не сохранился")
+	assert.Equal(t, "result lines", vars["hits"], "the call's result was not stored")
 }
 
-// Две записи одного и того же поля с разными значениями — ошибка описания, а не
-// повод угадывать, какая из них главная.
+// Two records of the same field with different values are an error in the skill,
+// not a reason to guess which of them is the real one.
 func TestCallStepConflictingSaveAsIsError(t *testing.T) {
 	f := parseFlow(t, `
 tools: ["srv"]
@@ -443,11 +446,12 @@ steps:
 `)
 	err := f.Validate()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "save_as указан дважды")
+	assert.Contains(t, err.Error(), "save_as given twice")
 }
 
-// builtin — псевдо-сервер встроенных тулов, а не MCP-адресат: набор серверов
-// потока про него ничего не знает, его радиус задаёт builtin_tools скилла.
+// builtin is the pseudo-server of built-in tools, not an MCP address: the flow's
+// server set knows nothing about it, its radius is set by the skill's
+// builtin_tools.
 func TestCallStepAllowsBuiltinServer(t *testing.T) {
 	f := parseFlow(t, `
 tools: ["tracker"]
@@ -458,15 +462,16 @@ steps:
       args: {name: chart_timeseries}
     save_as: chart
 `)
-	c := &seqCaller{outs: []string{"готово"}}
+	c := &seqCaller{outs: []string{"done"}}
 	vars, _, err := ExecuteWith(context.Background(), f, Deps{Caller: c}, nil)
-	require.NoError(t, err, "builtin отклонён радиусом потока")
-	assert.Equal(t, "готово", vars["chart"])
+	require.NoError(t, err, "builtin was rejected by the flow's radius")
+	assert.Equal(t, "done", vars["chart"])
 	require.Len(t, c.seen, 1)
 }
 
-// Отказ радиуса оставляет след: под политикой continue шаг иначе исчезал из
-// трассы бесследно, и выглядело это как отсутствие шага в описании.
+// A radius refusal leaves a trace: under the continue policy the step otherwise
+// vanished from the trace without a trace, and it looked like the step was
+// absent from the skill.
 func TestCallStepDeniedByScopeIsTraced(t *testing.T) {
 	f := parseFlow(t, `
 tools: ["tracker"]
@@ -480,7 +485,7 @@ steps:
 `)
 	_, outcome, err := ExecuteWith(context.Background(), f, Deps{Caller: &seqCaller{}}, nil)
 	require.NoError(t, err)
-	require.Len(t, outcome.Steps, 1, "отклонённый шаг не оставил следа")
+	require.Len(t, outcome.Steps, 1, "the rejected step left no trace")
 	assert.NotEqual(t, "ok", outcome.Steps[0].Outcome)
 	assert.Contains(t, outcome.Steps[0].Reason, "vcs")
 }

@@ -11,9 +11,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// for_each по списку строк — наблюдаемый случай «список, добытый инструментом».
+// for_each over a list of lines — the observed case of "a list produced by a
+// tool".
 func TestForEachOverLines(t *testing.T) {
-	c := &recordingCaller{out: "коммит найден"}
+	c := &recordingCaller{out: "commit found"}
 	f := parseFlow(t, `
 tools: ["srv"]
 steps:
@@ -31,11 +32,11 @@ steps:
 	vars, _, err := ExecuteWith(context.Background(), f, Deps{Caller: c},
 		map[string]string{"services": "billing\norders\n\nstate"})
 	require.NoError(t, err)
-	assert.Equal(t, 3, c.calls, "пустая строка не считается элементом")
-	assert.Equal(t, "коммит найден\n\nкоммит найден\n\nкоммит найден", vars["findings"])
+	assert.Equal(t, 3, c.calls, "an empty line does not count as an item")
+	assert.Equal(t, "commit found\n\ncommit found\n\ncommit found", vars["findings"])
 }
 
-// JSON-массив (структурный результат шага) итерируется поэлементно.
+// A JSON array (a step's structured result) is iterated element-wise.
 func TestForEachOverJSONArray(t *testing.T) {
 	f := parseFlow(t, `
 steps:
@@ -44,16 +45,17 @@ steps:
       as: it
       collect: acc
       steps:
-        - set: {var: acc, value: "элемент {{it}}"}
+        - set: {var: acc, value: "item {{it}}"}
 `)
 	vars, _, err := ExecuteWith(context.Background(), f, Deps{},
 		map[string]string{"items": `["a","b"]`})
 	require.NoError(t, err)
-	assert.Equal(t, "элемент a\n\nэлемент b", vars["acc"])
+	assert.Equal(t, "item a\n\nitem b", vars["acc"])
 }
 
-// Потолок обязателен по смыслу: цикл по коллекции неизвестной длины — прямой
-// путь к runaway. Частичная обработка ГОВОРИТСЯ, а не проглатывается.
+// The ceiling is required in spirit: a loop over a collection of unknown length
+// is a straight road to a runaway. Partial processing is SAID OUT LOUD rather
+// than swallowed.
 func TestForEachRespectsLimitAndSaysSo(t *testing.T) {
 	f := parseFlow(t, `
 steps:
@@ -68,10 +70,10 @@ steps:
 	vars, _, err := ExecuteWith(context.Background(), f, Deps{},
 		map[string]string{"items": "1\n2\n3\n4\n5"})
 	require.NoError(t, err)
-	assert.Contains(t, vars["acc"], "обработано 2 из 5")
+	assert.Contains(t, vars["acc"], "processed 2 of 5")
 }
 
-// Умолчание потолка применяется, даже когда описание его не задало.
+// The default ceiling applies even when the skill did not set one.
 func TestForEachDefaultLimit(t *testing.T) {
 	f := parseFlow(t, `
 steps:
@@ -89,23 +91,23 @@ steps:
 	vars, _, err := ExecuteWith(context.Background(), f, Deps{},
 		map[string]string{"items": strings.Join(many, "\n")})
 	require.NoError(t, err)
-	assert.Contains(t, vars["acc"], "обработано 10 из 25", "потолок по умолчанию")
+	assert.Contains(t, vars["acc"], "processed 10 of 25", "the default ceiling")
 }
 
 func TestForEachEmptyCollection(t *testing.T) {
 	f := parseFlow(t, `
 steps:
   - for_each: {in: items, as: it, steps: [{set: {var: a, value: "{{it}}"}}]}
-  - set: {var: after, value: "поток продолжился"}
+  - set: {var: after, value: "the flow carried on"}
 `)
 	vars, _, err := ExecuteWith(context.Background(), f, Deps{}, nil)
 	require.NoError(t, err)
-	assert.Equal(t, "поток продолжился", vars["after"])
+	assert.Equal(t, "the flow carried on", vars["after"])
 }
 
-// on_error цикла обязано РАБОТАТЬ, а не только парситься: описание просит
-// пометить элемент и идти дальше, и до этой правки цикл вместо этого падал на
-// первом же отказе, теряя остальные итерации.
+// A loop's on_error must WORK, not merely parse: the skill asks to mark the item
+// and move on, and before this fix the loop instead died on the very first
+// failure, losing the remaining iterations.
 func TestForEachOnErrorContinue(t *testing.T) {
 	var f Flow
 	require.NoError(t, yaml.Unmarshal([]byte(`
@@ -119,18 +121,18 @@ steps:
       max_iterations: 5
       steps:
         - name: work
-          instruction: обработай
+          instruction: process it
           tools: []
           save_as: out
 `), &f))
 
-	// Вторая итерация отказывает: одна неудача не должна ронять остальные.
-	r := &nthFailRunner{failAt: 2, text: "готово"}
+	// The second iteration fails: one failure must not take down the rest.
+	r := &nthFailRunner{failAt: 2, text: "done"}
 
 	vars, outcome, err := ExecuteWith(t.Context(), &f, Deps{Runner: r},
 		map[string]string{"items": "a\nb\nc"})
-	require.NoError(t, err, "цикл упал на отказавшей итерации")
-	assert.Equal(t, 3, r.calls, "цикл прервался вместо продолжения")
+	require.NoError(t, err, "the loop fell over on a failed iteration")
+	assert.Equal(t, 3, r.calls, "the loop stopped instead of carrying on")
 
 	var loop *StepTrace
 	for i := range outcome.Steps {
@@ -138,13 +140,13 @@ steps:
 			loop = &outcome.Steps[i]
 		}
 	}
-	require.NotNil(t, loop, "цикл не оставил следа")
+	require.NotNil(t, loop, "the loop left no trace")
 	assert.Equal(t, "degraded", loop.Outcome)
-	assert.Contains(t, loop.Reason, "отказали: 1")
+	assert.Contains(t, loop.Reason, "failed: 1")
 	assert.NotEmpty(t, vars["out"])
 }
 
-// nthFailRunner отказывает на N-й итерации и работает на остальных.
+// nthFailRunner fails on the Nth iteration and works on the rest.
 type nthFailRunner struct {
 	failAt, calls int
 	text          string
@@ -153,21 +155,21 @@ type nthFailRunner struct {
 func (r *nthFailRunner) Run(context.Context, StepRequest) (Result, error) {
 	r.calls++
 	if r.calls == r.failAt {
-		return Result{}, errors.New("элемент не найден")
+		return Result{}, errors.New("item not found")
 	}
 	return Result{Text: r.text}, nil
 }
 
-// Цикл обязан идти по ПОЛНОЙ коллекции, а не по превью.
+// A loop must walk the FULL collection, not a preview.
 //
-// Крупный результат `call:` приезжает в переменную обрезанным (4096 символов) с
-// хендлом рабочей памяти. Цикл по такому значению обошёл бы часть списка и
-// отдал результат, который выглядит полным — это хуже, чем честный потолок,
-// потому что молчит. Нашлось при переводе скилл на поштучный обзор
-// кусков диффа .
+// A large `call:` result arrives in the variable truncated (4096 characters)
+// with a working-memory handle. A loop over such a value would walk part of the
+// list and return a result that looks complete — worse than an honest ceiling,
+// because it stays silent. Found while porting a skill to reviewing diff chunks
+// one at a time.
 func TestForEachReadsFullCollectionFromMemory(t *testing.T) {
-	full := "часть-1\nчасть-2\nчасть-3\nчасть-4"
-	r := &fakeRunner{answer: map[string]string{"look": "ок"}}
+	full := "part-1\npart-2\npart-3\npart-4"
+	r := &fakeRunner{answer: map[string]string{"look": "ok"}}
 	f := parseFlow(t, `
 steps:
   - for_each:
@@ -176,18 +178,19 @@ steps:
       max_iterations: 10
       steps:
         - name: look
-          instruction: "смотрю {{p}}"
+          instruction: "looking at {{p}}"
 `)
 	_, _, err := ExecuteWith(context.Background(), f,
 		Deps{Runner: r, Memory: fakeMemory{"res-1": full}},
-		map[string]string{"parts": "часть-1\n[mem:res-1]"})
+		map[string]string{"parts": "part-1\n[mem:res-1]"})
 	require.NoError(t, err)
-	require.Len(t, r.seen, 4, "обошли все четыре части, а не одну из превью")
+	require.Len(t, r.seen, 4, "walked all four parts, not the one from the preview")
 }
 
-// `in` — имя переменной, не шаблон. Написанное шаблоном молчит: переменной с
-// именем «{{parts}}» нет, цикл делает ноль итераций и отчитывается «ok» —
-// пустой обход неотличим от успешного. Отказ на разборе дешевле.
+// `in` is a variable name, not a template. Written as a template it stays
+// silent: there is no variable named "{{parts}}", the loop makes zero iterations
+// and reports "ok" — an empty walk is indistinguishable from a successful one.
+// Refusing at parse time is cheaper.
 func TestForEachInRejectsTemplate(t *testing.T) {
 	var f Flow
 	require.NoError(t, yaml.Unmarshal([]byte(`
@@ -197,17 +200,17 @@ steps:
       as: p
       steps:
         - name: look
-          instruction: "смотрю {{p}}"
+          instruction: "looking at {{p}}"
 `), &f))
 	err := f.Validate()
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "ИМЯ переменной")
+	require.Contains(t, err.Error(), "variable NAME")
 }
 
-// `in` умеет поле, а не только целую переменную: результат инструмента — это
-// конверт, и обходить нужно его содержимое, а не сам конверт.
+// `in` handles a field too, not only a whole variable: a tool's result is an
+// envelope, and what must be walked is its contents rather than the envelope.
 func TestForEachInAcceptsField(t *testing.T) {
-	r := &fakeRunner{answer: map[string]string{"look": "ок"}}
+	r := &fakeRunner{answer: map[string]string{"look": "ok"}}
 	f := parseFlow(t, `
 steps:
   - for_each:
@@ -216,10 +219,10 @@ steps:
       max_iterations: 10
       steps:
         - name: look
-          instruction: "смотрю {{p}}"
+          instruction: "looking at {{p}}"
 `)
 	_, _, err := ExecuteWith(context.Background(), f, Deps{Runner: r},
-		map[string]string{"res": `{"exit_code":0,"stdout":"часть-1\nчасть-2\nчасть-3"}`})
+		map[string]string{"res": `{"exit_code":0,"stdout":"part-1\npart-2\npart-3"}`})
 	require.NoError(t, err)
-	require.Len(t, r.seen, 3, "обошли строки stdout, а не конверт целиком")
+	require.Len(t, r.seen, 3, "walked the lines of stdout, not the whole envelope")
 }
