@@ -316,6 +316,88 @@ func TestValidate(t *testing.T) {
 	})
 }
 
+// A response_schema without a model is a silent hole: the decoding grammar does
+// not survive every path to a model, and where it is dropped a "structured
+// answer" degenerates into "the model usually answers JSON" — parsed by luck.
+//
+// The rule lived only in the JSON schema, which the engine cannot run (it would
+// be a dependency), so an embedder without a schema validator never learned. It
+// is duplicated in Validate on purpose: five of the nine examples in this
+// repository broke it, and no Go test could see it.
+func TestResponseSchemaRequiresModel(t *testing.T) {
+	t.Run("rejected without a model", func(t *testing.T) {
+		var f Flow
+		require.NoError(t, yaml.Unmarshal([]byte(`
+steps:
+  - name: parse
+    instruction: pull the fields out
+    tools: []
+    response_schema:
+      type: object
+      properties: {cluster: {type: string}}
+`), &f))
+		err := f.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "response_schema without model")
+		assert.Contains(t, err.Error(), "parse", "the failing step is not named")
+	})
+
+	t.Run("accepted with a model", func(t *testing.T) {
+		var f Flow
+		require.NoError(t, yaml.Unmarshal([]byte(`
+steps:
+  - name: parse
+    instruction: pull the fields out
+    tools: []
+    model: some/model
+    response_schema:
+      type: object
+      properties: {cluster: {type: string}}
+`), &f))
+		assert.NoError(t, f.Validate())
+	})
+
+	// The schema attaches the rule to the STEP, not to the instruction: a stray
+	// response_schema on a `call` step is the same hole, minus even the model
+	// that could have honoured it.
+	t.Run("rejected on a call step too", func(t *testing.T) {
+		var f Flow
+		require.NoError(t, yaml.Unmarshal([]byte(`
+tools: [srv]
+steps:
+  - name: fetch
+    call: {tool: "srv:get", save_as: out}
+    response_schema:
+      type: object
+`), &f))
+		require.Error(t, f.Validate())
+	})
+
+	// A model on its own stays optional — the pair is what matters.
+	t.Run("a step without either is fine", func(t *testing.T) {
+		var f Flow
+		require.NoError(t, yaml.Unmarshal([]byte("steps:\n  - instruction: answer\n    tools: []"), &f))
+		assert.NoError(t, f.Validate())
+	})
+}
+
+// The refusal must land BEFORE the first generation. Validate runs inside
+// ExecuteWith, so a hole that used to be discovered by a mis-parsed answer
+// halfway through the flow now costs nothing at all.
+func TestResponseSchemaWithoutModelFailsBeforeAnyGeneration(t *testing.T) {
+	r := &fakeRunner{answer: map[string]string{"parse": `{"cluster":"staging"}`}}
+	_, _, err := ExecuteWith(t.Context(), parseFlow(t, `
+steps:
+  - name: parse
+    instruction: pull the fields out
+    tools: []
+    response_schema: {type: object}
+`), Deps{Runner: r}, nil)
+
+	require.Error(t, err)
+	assert.Empty(t, r.seen, "the flow reached the model before refusing")
+}
+
 // A classifier step exists for the sake of branching, while a model answers in
 // prose. Live case: "answer in one word: t1 or foreign" got back "Summary:
 // determined the resource type by prefix. Result: foreign" — correct in meaning,

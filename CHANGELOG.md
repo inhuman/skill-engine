@@ -29,6 +29,15 @@ Incompatible. Skills on format 1.x need migrating; `Migrate` does all of it.
 - **Breaking**: `CheckEngineVersion` now also rejects skills of a *previous*
   major (before, only ones "from the future" were rejected), including skills
   that declare no version at all — those read as 1.0.0.
+- **Breaking**: `Flow.Validate` now refuses a step that carries a
+  `response_schema` without a `model`, so a skill breaking the pair fails before
+  the first generation instead of running. The rule is not new — the schema has
+  demanded it from the start — but it was enforced only for embedders who run a
+  JSON-schema validator, and the engine cannot run one (it would be a
+  dependency). Left unpaired, the decoding grammar is dropped on some paths to a
+  model and a "structured answer" degenerates into "the model usually answers
+  JSON": parsed by luck, failing without a trace. Add the `model` the step was
+  already supposed to name.
 - **Added**: `mode: workflow | playbook` — which of the two descriptions to run
   when a skill has both. Without the field the default applies: "there is a
   `workflow` → follow it". An explicit mode with an empty half refuses rather
