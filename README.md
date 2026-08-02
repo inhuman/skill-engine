@@ -221,6 +221,14 @@ strip it before the call and put it back after — a wrapped input is refused,
 not guessed at. Format changes and what each migration does are in
 `CHANGELOG.md`.
 
+A skill file is more than its steps, so the whole file has a type too:
+`ParseSkill(raw, unmarshal)` reads header and description into a `Skill`, and
+`Skill.Validate()` checks the version, the header and the workflow in one go.
+Every field of that header is already described by the schema — that is, it
+belongs to the FORMAT — and yet each embedder used to declare its own struct for
+it and re-derive the same rules; two copies of a contract drift, and the field
+the engine gained is silently dropped by the copy.
+
 ## Invariants paid for with live failures
 
 - **A failure must be loud.** `degraded` is set on a step with no text, on a
@@ -264,6 +272,30 @@ more cheaply than a run does. `Flow.Validate` is called before execution and
 rejects what used to be reported as success; every new such class is closed off
 by a check in validation rather than by a paragraph here. Running it over
 descriptions before execution is worth it too — in CI, when a skill is written.
+
+## Checking a skill before it runs
+
+`Validate` refuses what **cannot** run. What runs **badly** is the business of
+`lint`, a subpackage under the same no-dependency rule:
+
+```go
+rep, err := lint.Lint(raw, facts, lint.Options{Unmarshal: yaml.Unmarshal})
+```
+
+26 rules, every one of them paid for by a broken turn, and every one about a
+defect that stays QUIET: a loop collecting into a variable nobody writes gathers
+nothing and reports success, a typo in a variable's name resolves to an empty
+string, a required field the instruction allows to be empty sends the model into
+whitespace up to the token ceiling.
+
+The rules that need to know the installation — which servers are up, which tools
+they carry, which built-in tools exist — take those facts from the embedder and
+**skip with a recorded reason** when they are not given: a partial check must
+never look like a clean one. Severity is the library's, the gate is yours.
+
+The rule table, what deliberately stays with the embedder, and the one
+limitation worth knowing before relying on it are in
+[lint/README.md](lint/README.md).
 
 ## Tests
 
