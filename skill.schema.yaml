@@ -100,8 +100,8 @@ properties:
     description: |
       The skill's name = the file's name.
 
-      The regexp is taken FROM THE CODE (`skillfile.skillNameRE`): it allows an
-      underscore.
+      The pattern is the one the engine enforces (`ValidateSkillName`); a test
+      keeps the two identical, so a name cannot pass here and fail there.
 
   description:
     type: string
@@ -524,15 +524,16 @@ $defs:
           For `call:` — the address of the call; for `instruction:` — whose
           tools the step is handed.
 
-          Why: some skills carry VARIANTS of one server (gitlab-dev/prod, many
-          k8s clusters, prometheus dev/prod). Without a runtime choice each of
-          them needs a `switch` of 2–5 nearly identical branches. Stronger than
+          Why: skills carry VARIANTS of one server (a repository dev/prod, a
+          cluster per environment, metrics dev/prod). Without a runtime choice
+          each of them needs a `switch` of 2–5 nearly identical branches — the
+          duplication that diverges on the first edit. Stronger than a
           substitution inside `call.tool`, because it also narrows the radius of
-          a MODEL step: today `k8s-pods` hands it the tools of all five clusters
-          at once.
+          a MODEL step, which would otherwise be handed the tools of every
+          variant at once.
 
-          Permissions are not weakened: `allowServer` checks the SUBSTITUTED
-          name, and it must belong to the flow's set.
+          Permissions are not weakened: the SUBSTITUTED name is checked, and it
+          must belong to the flow's set.
 
       when:
         type: string

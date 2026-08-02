@@ -332,14 +332,14 @@ steps:
   - name: logs
     on_server: "{{cluster}}"
     call:
-      tool: kubectl_logs
+      tool: get_logs
       args: {name: "pod-1"}
       save_as: out
 `)
 	_, _, err := ExecuteWith(context.Background(), f, Deps{Caller: c}, map[string]string{"cluster": "prod"})
 	require.NoError(t, err)
 	assert.Equal(t, "prod", c.server, "the call went to the computed server")
-	assert.Equal(t, "kubectl_logs", c.tool)
+	assert.Equal(t, "get_logs", c.tool)
 }
 
 // The computed name goes through THE SAME set check: substitution does not widen
@@ -352,12 +352,12 @@ steps:
   - name: logs
     on_server: "{{cluster}}"
     call:
-      tool: kubectl_logs
+      tool: get_logs
       save_as: out
 `)
-	_, _, err := ExecuteWith(context.Background(), f, Deps{Caller: c}, map[string]string{"cluster": "prod-k8s"})
+	_, _, err := ExecuteWith(context.Background(), f, Deps{Caller: c}, map[string]string{"cluster": "prod-extra"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "prod-k8s")
+	assert.Contains(t, err.Error(), "prod-extra")
 	assert.Zero(t, c.calls)
 }
 
