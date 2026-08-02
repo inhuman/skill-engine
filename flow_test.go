@@ -702,7 +702,7 @@ steps:
 func TestAllCallsFailedIsDegraded(t *testing.T) {
 	r := &fakeRunner{res: &Result{Text: "the model said something anyway", Calls: 7, CallsFailed: 7}}
 	f := parseFlow(t, `
-tools: ["repo-dev"]
+tools: ["repo"]
 steps:
   - name: judge
     instruction: "review the MR"
@@ -721,7 +721,7 @@ steps:
 func TestSomeCallsFailedStaysOK(t *testing.T) {
 	r := &fakeRunner{res: &Result{Text: "review ready", Calls: 5, CallsFailed: 2}}
 	f := parseFlow(t, `
-tools: ["repo-dev"]
+tools: ["repo"]
 steps:
   - name: judge
     instruction: "review the MR"
@@ -740,7 +740,7 @@ steps:
 func TestMaxToolErrorsReachesRunner(t *testing.T) {
 	r := &fakeRunner{answer: map[string]string{"judge": "done"}}
 	_, err := run(t, `
-tools: ["repo-dev"]
+tools: ["repo"]
 steps:
   - name: judge
     instruction: "review the MR"
