@@ -1,0 +1,44 @@
+# A program that passes a wrapper where the payload was meant.
+#
+# Defects: W8 (the loop iterates over the envelope), W10 (`from:` gets the
+# value's text instead of a handle), W3 (a typo in a tool's name).
+#
+# The W8 half is the quiet one: the loop makes exactly one iteration — over the
+# wrapper — and every counter downstream honestly reports zero.
+
+skill_engine_version: "2.1.0"
+skill_version: "1.0.0"
+name: envelope
+description: A fixture — a wrapped result taken whole.
+trigger_examples: ["a fixture phrase about an envelope"]
+servers: ["runner"]
+role: reader
+
+workflow:
+  tools: ["runner"]
+  steps:
+    - name: split
+      call:
+        tool: "runner:exec"
+        args: {code: "print(1)"}
+        save_as: parts
+
+    - name: loop
+      for_each:
+        in: parts
+        as: it
+        collect: got
+        steps:
+          - name: work
+            instruction: "handle {{it}}"
+            tools: []
+            save_as: got
+
+    - name: render
+      call:
+        tool: "runner:exe"
+        args:
+          code: "print(2)"
+          stdin:
+            - from: "{{parts}}"
+        save_as: answer
