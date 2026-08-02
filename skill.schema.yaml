@@ -465,9 +465,9 @@ $defs:
           the variable as an object, fields reachable as `{{var.field}}` — ONE
           level of nesting.
 
-          Why: `01-fetch-logs` extracts the cluster, the namespace and the pod in
-          ONE step instead of three, i.e. −2 generations per turn in a skill
-          that has only 3–4 of them.
+          Why: a live parsing step extracts the cluster, the namespace and the
+          pod in ONE step instead of three, i.e. −2 generations per turn in a
+          skill that has only 3–4 of them.
 
           Meaningful only where a decoding grammar works: on some paths the
           schema is dropped SILENTLY, and a "structured answer" degenerates into
@@ -766,7 +766,7 @@ $defs:
 
       A delegate's radius is the radius of the CALLED skill, not of the caller:
       a skill declares its own servers, and delegation does not widen the
-      caller's access (the same principle as `spawn_subagent` has today).
+      caller's access — the same principle a spawned sub-agent goes by.
     properties:
       skill:
         type: string

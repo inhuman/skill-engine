@@ -636,8 +636,8 @@ func (s *state) allowServer(server string) error {
 	if len(s.tools) == 0 {
 		// An empty flow set is NOT "everything is allowed". Symmetric to a
 		// step, where an empty list means "hand out no tools at all"; the
-		// opposite reading would make a skill without `servers` (the field is
-		// optional both in skill-writer and in the schema) unrestricted —
+		// opposite reading would make a skill without `servers` (an optional
+		// field, both in the schema and in whatever writes skills) unrestricted —
 		// including write tools.
 		return fmt.Errorf("server %q: the flow declares no servers", server)
 	}
