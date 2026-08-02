@@ -355,9 +355,9 @@ steps:
       tool: get_logs
       save_as: out
 `)
-	_, _, err := ExecuteWith(context.Background(), f, Deps{Caller: c}, map[string]string{"cluster": "prod-k8s"})
+	_, _, err := ExecuteWith(context.Background(), f, Deps{Caller: c}, map[string]string{"cluster": "prod-extra"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "prod-k8s")
+	assert.Contains(t, err.Error(), "prod-extra")
 	assert.Zero(t, c.calls)
 }
 

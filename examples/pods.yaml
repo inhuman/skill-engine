@@ -23,7 +23,7 @@ workflow:
         Request: {{input}}
 
         cluster — which cluster is named: staging or prod; none named — staging.
-        namespace — the namespace; none named — an empty string.
+        namespace — the namespace; none named — default.
       tools: []
       sampling:
         temperature: 0
@@ -34,6 +34,11 @@ workflow:
           cluster: {type: string}
           namespace: {type: string}
         # Anything not in required the model may legitimately not send — and does not.
+        #
+        # Both fields therefore need a DEFAULT in the instruction above, not
+        # "none named — an empty string": a required field the instruction
+        # allows to be empty leaves the model no legal output, and it either
+        # invents a value or walks off into whitespace up to the token ceiling.
         required: [cluster, namespace]
       save_as: req
 
