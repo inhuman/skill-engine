@@ -2,6 +2,8 @@ package skillengine_test
 
 import (
 	"go/build"
+	"io/fs"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -30,34 +32,69 @@ var allowedTestDeps = []string{
 //
 // Both production and test imports are checked: a test that pulled in a
 // dependency makes the library heavier just the same.
+// Every directory of the module is checked, not only this one: a dependency
+// pulled into a subpackage is a dependency of anyone who imports it, and the
+// rule would otherwise hold for exactly as long as the module had one package.
 func TestEngineStaysSelfContained(t *testing.T) {
-	pkg, err := build.ImportDir(".", 0)
-	if err != nil {
-		t.Fatalf("parsing the package: %v", err)
-	}
-
-	// Production code — stdlib only. Not a single exception: as soon as the
-	// first one appears, so will the second.
-	for _, imp := range pkg.Imports {
-		if external(imp) {
-			t.Errorf("production code imports %s — the engine must have no dependencies", imp)
+	for _, dir := range packageDirs(t) {
+		pkg, err := build.ImportDir(dir, 0)
+		if err != nil {
+			t.Fatalf("parsing the package in %s: %v", dir, err)
 		}
-	}
-	// Tests may use the short list: they do not end up in anyone else's build.
-	for _, imports := range [][]string{pkg.TestImports, pkg.XTestImports} {
-		for _, imp := range imports {
-			if external(imp) && !slicesContains(allowedTestDeps, imp) {
-				t.Errorf("a test imports %s — a dependency outside the declared list", imp)
+
+		// Production code — stdlib only. Not a single exception: as soon as the
+		// first one appears, so will the second.
+		for _, imp := range pkg.Imports {
+			if external(imp) {
+				t.Errorf("%s: production code imports %s — the engine must have no dependencies", dir, imp)
+			}
+		}
+		// Tests may use the short list: they do not end up in anyone else's build.
+		for _, imports := range [][]string{pkg.TestImports, pkg.XTestImports} {
+			for _, imp := range imports {
+				if external(imp) && !slicesContains(allowedTestDeps, imp) {
+					t.Errorf("%s: a test imports %s — a dependency outside the declared list", dir, imp)
+				}
 			}
 		}
 	}
 }
 
+// packageDirs lists the module's package directories by walking, rather than by
+// a written-out list: a list is what the next package gets left out of.
+func packageDirs(t *testing.T) []string {
+	t.Helper()
+	var dirs []string
+	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		if name := d.Name(); path != "." && (strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_")) {
+			return fs.SkipDir
+		}
+		if files, _ := filepath.Glob(filepath.Join(path, "*.go")); len(files) > 0 {
+			dirs = append(dirs, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking the module: %v", err)
+	}
+	if len(dirs) < 2 {
+		t.Fatalf("only %d package directory found — the walk stopped seeing the module", len(dirs))
+	}
+	return dirs
+}
+
 // external — an import that is not stdlib (a domain in the first segment) and
-// not the engine itself: tests from the external package import it by name, and
-// that is not a dependency but a way of exercising the public API from outside.
+// not the module itself: tests from the external package import it by name, and
+// the linter imports the engine — neither is a dependency, both are the module
+// using its own public API.
 func external(imp string) bool {
-	if imp == selfModule {
+	if imp == selfModule || strings.HasPrefix(imp, selfModule+"/") {
 		return false
 	}
 	head, _, _ := strings.Cut(imp, "/")

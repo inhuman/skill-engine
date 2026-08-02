@@ -44,6 +44,23 @@ func parseCond(cond string) (name, op, want string, err error) {
 	return m[1], m[2], strings.Trim(m[3], `"'`), nil
 }
 
+// CondVar returns the variable a branch condition tests, and whether the
+// condition parses at all.
+//
+// Exported so that whoever reads a description — a linter, an editor, a
+// visualiser — asks the engine which name a condition depends on instead of
+// re-deriving the grammar from the docs. A second parser of the same syntax
+// drifts on the first change: the left operand is a NAME while the right one is
+// a literal, and a reader that misses the difference reports the value as a
+// missing variable.
+func CondVar(cond string) (string, bool) {
+	name, _, _, err := parseCond(cond)
+	if err != nil {
+		return "", false
+	}
+	return name, true
+}
+
 func (s *state) eval(cond string) (bool, error) {
 	name, op, want, err := parseCond(cond)
 	if err != nil {

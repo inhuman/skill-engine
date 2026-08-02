@@ -1,0 +1,15 @@
+# A playbook skill that names things the installation does not have.
+#
+# Defects: S3 (a removed construct), E5 (an undeclared built-in tool),
+# S6 (no trigger_examples).
+
+skill_engine_version: "2.1.0"
+skill_version: "1.0.0"
+name: prose-defects
+description: A fixture — prose that reaches for what the installation does not carry.
+servers: ["wiki"]
+role: reader
+
+playbook: |
+  Find the page, then look the numbers up with recall.
+  Count them: run_script(name="count_per_day").

@@ -1,0 +1,49 @@
+# A structured answer with nothing holding it together.
+#
+# Defects: W16 (a required field the instruction allows to be empty), W9 (an
+# object with no required fields), W13 (a free-text field with no ceiling).
+#
+# All three are invisible at run time: the schema is satisfied, the step is ok,
+# the answer parses — and the fields that decide the turn are missing from it.
+
+skill_engine_version: "2.1.0"
+skill_version: "1.0.0"
+name: loose-schema
+description: A fixture — a response schema that promises nothing.
+trigger_examples: ["a fixture phrase about a loose schema"]
+servers: ["wiki"]
+role: reader
+
+workflow:
+  tools: ["wiki"]
+  steps:
+    - name: understand
+      instruction: |-
+        cluster — which cluster is named. Not named — staging.
+
+        namespace — which namespace is named. Not named — an empty string.
+      model: small-model
+      tools: []
+      save_as: req
+      response_schema:
+        type: object
+        required: [cluster, namespace]
+        properties:
+          cluster: {type: string}
+          namespace: {type: string}
+
+    - name: judge
+      instruction: "collect the findings for {{req.cluster}}"
+      model: small-model
+      tools: []
+      response_schema:
+        type: object
+        required: [findings]
+        properties:
+          findings:
+            type: array
+            items:
+              type: object
+              properties:
+                file: {type: string, maxLength: 200}
+                message: {type: string}
