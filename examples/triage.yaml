@@ -11,6 +11,11 @@ description: Triage an error report and file a ticket if one is needed.
 role: investigator
 kind: composite
 
+# The ceiling of the radius. The ticket step below narrows it to `tracker`; a
+# step can only narrow what is declared here, never widen it — so a server the
+# skill does not name would simply not reach the step.
+servers: [tracker]
+
 meta:
   owner: platform-team
 
