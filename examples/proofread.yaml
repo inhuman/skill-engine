@@ -43,7 +43,10 @@ workflow:
             items:
               type: object
               properties:
-                quote: {type: string}
+                # A ceiling on every free-text field inside an array: the model
+                # is entitled to write up to the token limit, and breaking off
+                # on one entry takes the whole answer with it.
+                quote: {type: string, maxLength: 300}
                 rule: {type: integer}
                 fix: {type: string, maxLength: 400}
               required: [quote, rule, fix]
