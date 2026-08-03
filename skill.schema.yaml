@@ -430,6 +430,18 @@ $defs:
           format's main construct: the prohibition "do not go to that source"
           becomes impossible to violate instead of being requested.
           The flow's set cannot be widened — only narrowed.
+
+          A step with no tools also reads its variables DIFFERENTLY, and the
+          engine does that for it. A large result normally reaches a model as a
+          fragment plus the host's note saying how to fetch the rest — useful to
+          a step that can call, impossible for a step that cannot. Told to make
+          a call it has no way to make, a model writes the call out as its
+          answer: a live failure ended a turn with the arguments of a memory
+          call printed where a report was meant, and the step was recorded as
+          `ok`. So a step without tools is substituted the WHOLE value instead,
+          note stripped. Where the whole cannot be read at all, the step still
+          runs on the fragment and is marked degraded — it worked on part of the
+          data, and nothing else would have shown that.
       max_calls:
         type: integer
         minimum: 0
