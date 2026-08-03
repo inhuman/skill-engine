@@ -1,0 +1,39 @@
+# A program that runs green and gathers nothing.
+#
+# Defects: W2 (a server the skill did not declare), W12 (a tool named without
+# saying how tools are called), W14 (a typo in a variable's name), W6 (the loop
+# collects into a variable nobody writes).
+#
+# Not one of these fails at run time. The loop honestly makes its iterations,
+# the answer is honestly worded — over an empty space.
+
+skill_engine_version: "2.1.0"
+skill_version: "1.0.0"
+name: silent-loop
+description: A fixture — a loop that collects nothing and an answer built on it.
+trigger_examples: ["a fixture phrase about a silent loop"]
+servers: ["docs"]
+role: reader
+
+workflow:
+  tools: ["docs", "tracker"]
+  steps:
+    - name: search
+      instruction: "find the pages with page_search for {{quer}}"
+      tools: ["docs"]
+      save_as: hits
+
+    - name: loop
+      for_each:
+        in: hits
+        as: it
+        collect: located
+        steps:
+          - name: work
+            instruction: "handle {{it}}"
+            tools: []
+            save_as: other
+
+    - name: answer
+      instruction: "report what was found: {{located}}"
+      tools: []

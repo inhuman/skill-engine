@@ -1,0 +1,29 @@
+# A dictionary whose entries swallow each other.
+#
+# Defect: W18. A `contains` matches a word that STARTS with the alternative, so
+# `заказы` can never add anything beside `заказ`, and the duplicate `чай` can
+# never add anything beside itself.
+#
+# Nothing fails: the condition works exactly as if the dead entries were not
+# there. What is lost is the author's belief that they covered a case — and the
+# question the dead entry hides, which is whether the short root is short enough
+# to collide with words nobody meant.
+
+skill_engine_version: "2.2.0"
+skill_version: "1.0.0"
+name: dead-alternative
+description: A fixture — a contains dictionary with entries that can never matter.
+trigger_examples: ["a fixture phrase about a dictionary"]
+role: reader
+
+workflow:
+  steps:
+    - name: pick_order
+      when: "input contains заказ | заказы | десерт"
+      set: {var: course, value: order}
+
+    - if:
+        cond: "input contains чай | кофе | чай"
+        then:
+          - name: pick_drink
+            set: {var: course, value: drink}

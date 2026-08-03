@@ -1,0 +1,82 @@
+# Choosing what to look up by the WORDS of the request — without asking a model.
+#
+# This skill used to open with a step whose only job was "which course did they
+# name": an instruction carrying a dictionary of synonyms, a small model, and a
+# structured answer of booleans. The mapping was deterministic — the model was
+# there only to apply it, and applied it badly. In one measured catalogue such a
+# step got 5 of 10 live requests right at temperature 0, while the same
+# dictionary in a condition got all 10; three rewordings of the instruction did
+# not move the ceiling. Every miss was one kind: falling back to a default and
+# dropping what the request had NAMED.
+#
+# The domain here is a kitchen on purpose. The words in a dictionary belong to
+# the application, never to the format: an agent about a car fleet or a
+# warehouse shares this mechanism and not one of these words.
+
+skill_engine_version: "2.2.0"
+skill_version: "1.0.0"
+name: menu
+description: Suggest dishes from the sections of the menu the request names — a dessert, a drink, a main course.
+trigger_examples:
+  - "подбери десерт и напиток"
+  - "what do you have for a main course"
+role: reader
+kind: leaf
+
+servers: [recipes]
+
+workflow:
+  tools: [recipes]
+
+  steps:
+    # An honest exit when the request names no section: better than guessing one
+    # and answering about the wrong half of the menu. Up to six synonyms fit on
+    # one line — `|` separates alternatives and any ONE of them is enough.
+    - name: nothing_named
+      when: "input not contains десерт | сладк | напит | чай | чаю | кофе | горяч | второе | салат | закус | dessert | drink | main course"
+      exit: {reason: "the request names no section of the menu"}
+
+    # `десерт` and `сладк` are ROOTS, not words: a match starts at a word's start
+    # and is free at its end, so they find «десерты», «десертов», «сладкое»,
+    # «сладенького». That is why the format needs no stemming — the author picks
+    # the root, and the engine does not guess at a language it does not know.
+    #
+    # The flip side is that a root must be long enough to BE a root. «ча» would
+    # find «час» and «часть», so the forms of «чай» are listed instead. The
+    # linter warns when one alternative is already covered by a shorter one,
+    # which is the same mistake seen from the other end.
+    - name: pick_dessert
+      when: "input contains десерт | сладк | dessert"
+      call:
+        tool: "recipes:search"
+        args: {section: dessert, query: "{{input}}"}
+        save_as: desserts
+
+    - name: pick_drink
+      when: "input contains напит | чай | чаю | кофе | коктейл | drink"
+      call:
+        tool: "recipes:search"
+        args: {section: drink, query: "{{input}}"}
+        save_as: drinks
+
+    - name: pick_main
+      when: "input contains горяч | второе | main course"
+      call:
+        tool: "recipes:search"
+        args: {section: main, query: "{{input}}"}
+        save_as: mains
+
+    # A step that was skipped left its variable unset, and the engine substitutes
+    # an empty string — which is exactly what "we did not look there" should look
+    # like to the step that words the answer.
+    - name: answer
+      instruction: |
+        The request: {{input}}
+
+        Desserts: {{desserts}}
+        Drinks: {{drinks}}
+        Mains: {{mains}}
+
+        Answer from what was found. Do not mention a section that came back
+        empty — the request did not ask for it.
+      tools: []

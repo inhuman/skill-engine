@@ -1,0 +1,55 @@
+# A program that mishandles its payloads and its addresses.
+#
+# Defects: W4 (code substituted into the instruction's text), W11 (a param
+# nobody reads, and code whose language is not named), W5 (a call without a
+# required argument), W7 (a built-in called but not declared), W15 (a declared
+# built-in that does not exist), W17 (`switch.var` given a template), E4 (a
+# delegate step naming a skill that is not in the catalogue).
+
+skill_engine_version: "2.1.0"
+skill_version: "1.0.0"
+name: payload
+description: A fixture — payloads passed the wrong way and addresses that do not exist.
+trigger_examples: ["a fixture phrase about payloads"]
+servers: ["docs"]
+builtin_tools: ["draw_chart"]
+role: reader
+
+workflow:
+  tools: ["docs"]
+
+  assets:
+    probe:
+      kind: code
+      source: inline
+      params: {lnag: python}
+      content: "print(1)"
+
+  steps:
+    - name: fetch
+      call:
+        tool: "docs:page_get"
+        args: {}
+        save_as: page
+
+    - name: show
+      instruction: "run this: {{asset:probe}}"
+      tools: []
+      save_as: mode
+
+    - name: branch
+      switch:
+        var: "{{mode}}"
+        cases:
+          chart:
+            - name: draw
+              call:
+                tool: "builtin:render_diagram"
+                args: {name: chart}
+                save_as: picture
+
+    - name: ask
+      delegate:
+        skill: no-such-skill
+        task: "look up the rest"
+        save_as: extra

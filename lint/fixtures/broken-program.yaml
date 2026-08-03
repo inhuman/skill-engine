@@ -1,0 +1,27 @@
+# A description the engine itself refuses.
+#
+# Defect: W1. The step does two things at once, and the engine cannot tell which
+# was meant. Nothing else is reported: the rules below W1 read a description
+# Validate has normalised, and reporting on a half-parsed one would be reporting
+# about a skill nobody executes.
+
+skill_engine_version: "2.1.0"
+skill_version: "1.0.0"
+name: broken-program
+description: A fixture — a description that does not pass the engine's validation.
+trigger_examples: ["a fixture phrase about a broken program"]
+servers: ["docs"]
+role: reader
+
+workflow:
+  tools: ["docs"]
+  steps:
+    - name: confused
+      switch:
+        var: mode
+        cases:
+          a:
+            - name: inner
+              instruction: handle it
+              tools: []
+      instruction: and an instruction in the same step

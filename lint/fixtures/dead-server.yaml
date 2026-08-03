@@ -1,0 +1,15 @@
+# A skill whose radius does not match the installation.
+#
+# Defects: E1 (a server that is not registered), E3 (a read-only role next to a
+# server that writes), E2 (a tool the playbook calls is not on that server).
+
+skill_engine_version: "2.1.0"
+skill_version: "1.0.0"
+name: dead-server
+description: A fixture — the declared radius and the live installation disagree.
+trigger_examples: ["a fixture phrase about a dead server"]
+servers: ["ghost", "store"]
+role: reader
+
+playbook: |
+  Run call_tool(server="docs", tool="page_serch", args={}) and report what came back.

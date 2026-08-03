@@ -1,0 +1,64 @@
+# A whole small skill: parse the request → call → answer.
+#
+# Shows the format's main property: the tool set is defined by the STEP.
+# The parse and answer steps have `tools: []` — they physically cannot go
+# anywhere.
+
+skill_engine_version: "2.0.0"
+skill_version: "1.0.0"
+name: pods
+description: Show a cluster's pods in a given namespace.
+role: reader
+kind: leaf
+
+# The clusters the skill is allowed to reach at all.
+servers: [staging, prod]
+
+workflow:
+  tools: [staging, prod]
+  steps:
+    # Parsing the request into fields. No tools — the step has nothing to call.
+    - name: understand
+      instruction: |
+        Request: {{input}}
+
+        cluster — which cluster is named: staging or prod; none named — staging.
+        namespace — the namespace; none named — default.
+      tools: []
+      sampling:
+        temperature: 0
+      model: vllm/gemma-4-e4b       # a response_schema without a model choice = a silent hole
+      response_schema:
+        type: object
+        properties:
+          cluster: {type: string}
+          namespace: {type: string}
+        # Anything not in required the model may legitimately not send — and does not.
+        #
+        # Both fields therefore need a DEFAULT in the instruction above, not
+        # "none named — an empty string": a required field the instruction
+        # allows to be empty leaves the model no legal output, and it either
+        # invents a value or walks off into whitespace up to the token ceiling.
+        required: [cluster, namespace]
+      save_as: req
+
+    # A call without generation: the arguments are known, the model has nothing
+    # to do here.
+    - name: fetch
+      call:
+        tool: list_pods
+        args:
+          namespace: "{{req.namespace}}"
+      # The server is computed from the parse — but only WITHIN the set above:
+      # a step may narrow the radius, it cannot widen it.
+      on_server: "{{req.cluster}}"
+      save_as: pods
+
+    # A step without save_as writes the turn's answer.
+    - name: report
+      instruction: |
+        Pods of namespace {{req.namespace}} (cluster {{req.cluster}}):
+        {{pods}}
+
+        Answer: pod name → status.
+      tools: []
