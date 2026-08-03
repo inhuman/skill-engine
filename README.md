@@ -204,6 +204,15 @@ it is the stored value that flows on. It works on `call` steps too, except
   the model's context.
 - `{{asset:name}}` substitutes an asset into TEXT (it passes through the
   context), `{from: "asset:name"}` — by REFERENCE (it does not).
+- **A step without tools reads a variable whole.** A large result reaches a
+  model as a fragment plus the host's note saying how to read the rest — which
+  a step with tools follows by calling, and a step without tools cannot follow
+  at all. Told to make a call it has no way to make, a model writes the call out
+  as its answer (a live turn ended with the arguments of a memory call printed
+  where a report was meant, and the step was recorded `ok`). So the addressee of
+  a substitution is three, not two: a script or a call argument gets the
+  payload, a model that CAN fetch more gets the fragment and the note, and a
+  model that cannot gets the whole value.
 - `<collect>.skipped` — branches skipped because of `when`. Without it the
   answering step cannot tell "the source answered nothing" from "we never went
   to the source".

@@ -32,12 +32,67 @@ var varRe = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-z
 // rather than staying as text: a marker that reaches the model reads to it as
 // part of the instruction and produces questions about "the variable var".
 func (s *state) expand(text string) string {
+	out, _ := s.expandWith(text, func(name string) (string, bool) { return s.lookup(name), true })
+	return out
+}
+
+// expandWhole — substitution for a step that CANNOT fetch the rest of a value.
+//
+// A variable holds what the host would show a model: a large result arrives as
+// a fragment with a note saying where the whole is and how to read it. For a
+// step with tools that note is the point — the model follows it and calls.
+//
+// A step declared without tools has nothing to follow it with, and a model
+// handed an instruction it cannot carry out does the only thing left: it writes
+// the call out as its answer. Live failure — a reporting step answered with the
+// arguments of a memory call, printed as prose. Nothing failed loudly: the step
+// was `ok`, the counters were clean, and the user was the first to see it.
+//
+// So the addressee is not "a model" but "a model that can fetch more" and "a
+// model that cannot", and the second one is given the whole value.
+//
+// Size was considered and deliberately NOT capped. The alternative — hand over
+// a fragment above some ceiling — needs the fragment to SAY it is one, and this
+// library ships no words: it would have to keep the host's note (the failure
+// above), strip it (a step reasoning over a fragment it cannot know is one), or
+// invent wording in a language it does not know. A long prompt fails loudly;
+// all three of those fail quietly.
+//
+// Returns the name of the first variable that could NOT be made whole — the
+// value carries a handle and there is no reader for it, or the reader no longer
+// has it. The step still runs, on the fragment, and the caller is told.
+func (s *state) expandWhole(text string) (string, string) {
+	return s.expandWith(text, func(name string) (string, bool) {
+		raw := s.lookup(name)
+		id := memHandle(raw)
+		if id == "" {
+			return trimHostNote(raw, s.vocab.TruncationNotes), true
+		}
+		if s.memory != nil {
+			if full, ok := s.memory.Get(id); ok {
+				return trimHostNote(full, s.vocab.TruncationNotes), true
+			}
+		}
+		// The note goes even so: an instruction to make a call this step cannot
+		// make is worse than a fragment, and the fragment is reported.
+		return trimHostNote(raw, s.vocab.TruncationNotes), false
+	})
+}
+
+func (s *state) expandWith(text string, value func(name string) (string, bool)) (string, string) {
 	text = assetRe.ReplaceAllStringFunc(text, func(m string) string {
 		return s.asset(assetRe.FindStringSubmatch(m)[1])
 	})
-	return varRe.ReplaceAllStringFunc(text, func(m string) string {
-		return s.lookup(varRe.FindStringSubmatch(m)[1])
+	unresolved := ""
+	out := varRe.ReplaceAllStringFunc(text, func(m string) string {
+		name := varRe.FindStringSubmatch(m)[1]
+		v, ok := value(name)
+		if !ok && unresolved == "" {
+			unresolved = name
+		}
+		return v
 	})
+	return out, unresolved
 }
 
 // expandForArgs — substitution into call ARGUMENTS, not into an instruction.

@@ -173,9 +173,17 @@ func (s *state) runStep(ctx context.Context, step Step) (bool, error) {
 		}
 		tools = []string{only}
 	}
+	// A step that was handed no tools cannot follow a note telling it to fetch
+	// the rest of a value, so it is given the whole thing instead (see
+	// expandWhole). `on_server` above counts as having tools: it narrows the
+	// radius to one server rather than removing it.
+	instruction, unreachable := s.expand(run.Instruction), ""
+	if len(tools) == 0 {
+		instruction, unreachable = s.expandWhole(run.Instruction)
+	}
 	req := StepRequest{
 		Name:           step.Name,
-		Instruction:    s.expand(run.Instruction),
+		Instruction:    instruction,
 		Model:          run.Model,
 		Sampling:       run.Sampling,
 		ResponseSchema: run.ResponseSchema,
@@ -257,6 +265,16 @@ func (s *state) runStep(ctx context.Context, step Step) (bool, error) {
 		// — it comes first.
 		case res.Note != "":
 			s.traceCalls(step, "degraded", res.Note, calls, failed, started)
+		// A toolless step left with a fragment did its work on part of the data
+		// and had no way to know it: there was no tool to fetch the rest and no
+		// reader to resolve the handle. Nothing about the answer shows that, so
+		// the trace has to — this is the quiet half of the very failure the
+		// whole-value rule exists to remove.
+		case unreachable != "":
+			s.traceCalls(step, "degraded",
+				fmt.Sprintf("%q was a preview and the whole value could not be read: "+
+					"the step has no tools to fetch it and Deps.Memory did not resolve the handle", unreachable),
+				calls, failed, started)
 		// Every call failed — the step did NOT do its job, even if some text
 		// came from the model. Otherwise a turn with seven rejected calls is
 		// recorded as a success and the reason is hunted for in pod logs.

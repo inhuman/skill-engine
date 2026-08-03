@@ -21,6 +21,34 @@ wrap skills in something of your own — front matter, a markdown body, several
 documents in one file — unwrap before calling and wrap the result back;
 anything else is refused rather than guessed at.
 
+## 2.2.1
+
+An engine fix; the format itself did not change, so nothing needs migrating and
+no skill has to declare this version.
+
+- **Fixed**: a step declared WITHOUT tools was substituted a large value the way
+  a step with tools is — a fragment plus the host's note saying how to fetch the
+  rest. It has nothing to fetch it with, and a model told to make a call it
+  cannot make writes the call out as its answer. A live turn ended with the
+  arguments of a memory call printed where a report was meant; the step was
+  recorded `ok`, the counters were clean, and the user saw it first.
+
+  Such a step is now substituted the WHOLE value, note stripped. The addressee
+  of a substitution turned out to be three, not two: a script or a call argument
+  needs the payload, a model that CAN fetch more needs the fragment and the
+  note, and a model that cannot needs the whole thing.
+
+  Size is deliberately not capped. Handing over a fragment above some ceiling
+  needs the fragment to SAY it is one, and the library ships no words: it would
+  have to keep the host's note (the failure above), strip it (a step reasoning
+  over a fragment it cannot know is one), or invent wording in a language it
+  does not know. A long prompt fails loudly; all three of those fail quietly.
+
+  Where the whole value cannot be read at all — a handle with no `Deps.Memory`
+  to resolve it — the step still runs on the fragment and is marked **degraded**
+  with the variable named. It worked on part of the data, and nothing about its
+  answer would have shown that.
+
 ## 2.2.0
 
 One new condition form. A skill that does not use it behaves exactly as it did,
