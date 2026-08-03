@@ -113,6 +113,46 @@ steps:
 | `delegate` | delegating to another skill (the application decides how to execute it) |
 | `exit` | "matched by mistake" — the turn returns to its ordinary path |
 
+## Branching on the words of a request
+
+A condition compares with `==`, `!=`, `is [not] empty` — and with `contains`:
+
+```yaml
+- name: search_wiki
+  when: "input contains вики | wiki | confluence"
+  call: {tool: "wiki:page_search", args: {query: "{{input}}"}, save_as: found}
+
+- name: nothing_named
+  when: "input not contains вики | wiki | тикет | jira"
+  exit: {reason: "the request names no source this skill can read"}
+```
+
+Any ONE alternative is enough, and an alternative may contain spaces. This
+replaces a whole kind of step: a classifier whose only job is "which of these
+words did the request name" already carries the mapping in its own text, so the
+decision is deterministic and the model is there only to apply it. Measured on
+ten live requests — the model at temperature 0 got **5 of 10**, the same
+dictionary in a condition **10 of 10**, and three rewordings of the instruction
+did not move the ceiling. Every miss was one kind: falling back to a default and
+dropping what the request had NAMED.
+
+Two properties are worth knowing before you write a dictionary:
+
+- a match must begin where a **word starts**, and that is the default rather
+  than an option — a false match is nearly impossible to debug because the
+  condition looks right (`пуст` inside `перезапустить`, `search` inside
+  `research`). Note that Go's `\b` is ASCII-only and would not have helped here
+  at all;
+- the **end is free**, so an alternative matches a word that starts with it.
+  That is what lets a dictionary hold ROOTS — `жир` finds `жиру`, `жире`,
+  `жира` — and a dictionary of roots is why the format needs no stemming, which
+  would be a guess about a language the engine does not know. The cost: a
+  too-short root collides (`ком` finds `компонентах`), and the linter's W18
+  warns when one alternative is already covered by a shorter one.
+
+Regular expressions are deliberately absent: they would make skills unreadable
+and open the door to catastrophic backtracking.
+
 ## Shared step settings
 
 What repeats across a catalogue is usually not the step but its envelope. A
@@ -282,7 +322,7 @@ descriptions before execution is worth it too — in CI, when a skill is written
 rep, err := lint.Lint(raw, facts, lint.Options{Unmarshal: yaml.Unmarshal})
 ```
 
-26 rules, every one of them paid for by a broken turn, and every one about a
+27 rules, every one of them paid for by a broken turn, and every one about a
 defect that stays QUIET: a loop collecting into a variable nobody writes gathers
 nothing and reports success, a typo in a variable's name resolves to an empty
 string, a required field the instruction allows to be empty sends the model into

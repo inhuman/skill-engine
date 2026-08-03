@@ -21,6 +21,47 @@ wrap skills in something of your own — front matter, a markdown body, several
 documents in one file — unwrap before calling and wrap the result back;
 anything else is refused rather than guessed at.
 
+## 2.2.0
+
+One new condition form. A skill that does not use it behaves exactly as it did,
+so nothing needs migrating; a skill that uses it must declare
+`skill_engine_version: 2.2.0`, which is what stops an older engine from reading
+it and refusing the condition it cannot parse.
+
+- **Added**: `var contains a | b | c` and `var not contains a | b` alongside
+  `==`, `!=` and `is [not] empty`. Any ONE alternative is enough; an alternative
+  may contain spaces.
+
+  Why. A classifier step whose whole job is "which of these words did the
+  request name" already carries the mapping in its own text — the decision is
+  deterministic, and the model is there only to apply it. Measured on ten live
+  requests: the model at temperature 0 got 5 of 10, the same dictionary in a
+  condition got 10 of 10, and three rewordings of the instruction did not move
+  the ceiling. Every miss was one kind — falling back to a default and dropping
+  what the request had NAMED. In one live catalogue 14 steps across 14 skills
+  carry such a dictionary; each is a model call this replaces.
+
+  Matching is case-insensitive across scripts, not only ASCII. A match must
+  begin where a WORD STARTS — the default rather than an option, because the
+  author will not think about it while a false match is nearly impossible to
+  debug: the condition looks right. (Go's `\b` is ASCII-only and does not work
+  on Cyrillic at all.) The END is deliberately free, so an alternative matches a
+  word that starts with it: that is what lets a dictionary hold ROOTS — «жир»
+  finds «жиру», «жире», «жира» — and a dictionary of roots is why the format
+  needs no stemming, which would be a guess about a language the engine does not
+  know. The cost is that a too-short root collides, and the linter's W18 warns
+  when one alternative is already covered by a shorter one.
+
+  There are deliberately no regular expressions in a condition: they would make
+  skills unreadable and open the door to catastrophic backtracking.
+
+- **Changed**: a condition now reads the WHOLE value of its variable, with the
+  host's note stripped, the way a tool argument and a loop's collection already
+  did. A large result lives in a variable as a preview plus a handle, and a
+  condition reading the preview answered about the first few hundred bytes while
+  looking exactly as if it had answered about the value. No skill that fits in a
+  preview changes behaviour.
+
 ## 2.1.0
 
 Two optional fields. A skill that does not mention them behaves exactly as it

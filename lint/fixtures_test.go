@@ -18,13 +18,14 @@ import (
 // is a rule that silently went missing, and a rule that fires where it was not
 // expected is the noise that stops the report being read.
 var fixtureRules = map[string][]string{
-	"prose-defects.yaml":  {"S3", "S6", "E5"},
-	"dead-server.yaml":    {"E1", "E2", "E3"},
-	"broken-program.yaml": {"W1"},
-	"silent-loop.yaml":    {"W2", "W6", "W12", "W14"},
-	"envelope.yaml":       {"W3", "W8", "W10"},
-	"loose-schema.yaml":   {"W9", "W13", "W16"},
-	"payload.yaml":        {"W4", "W5", "W7", "W11", "W15", "W17", "E4"},
+	"prose-defects.yaml":    {"S3", "S6", "E5"},
+	"dead-server.yaml":      {"E1", "E2", "E3"},
+	"broken-program.yaml":   {"W1"},
+	"silent-loop.yaml":      {"W2", "W6", "W12", "W14"},
+	"envelope.yaml":         {"W3", "W8", "W10"},
+	"loose-schema.yaml":     {"W9", "W13", "W16"},
+	"payload.yaml":          {"W4", "W5", "W7", "W11", "W15", "W17", "E4"},
+	"dead-alternative.yaml": {"W18"},
 }
 
 func lintFixture(t *testing.T, name string) lint.Report {

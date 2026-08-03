@@ -16,6 +16,7 @@ the report being read.
 | `silent-loop.yaml` | W2, W6, W12, W14 | a program that runs green and gathers nothing |
 | `envelope.yaml` | W3, W8, W10 | a wrapper passed where the payload was meant |
 | `loose-schema.yaml` | W9, W13, W16 | a structured answer with nothing holding it together |
+| `dead-alternative.yaml` | W14, W18 | a `contains` dictionary whose entries swallow each other |
 | `payload.yaml` | W4, W5, W7, W11, W15, W17, E4 | payloads passed the wrong way, addresses that do not exist |
 
 Two rules have no fixture on purpose: **S1** needs a file that does not load,

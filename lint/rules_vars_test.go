@@ -202,6 +202,58 @@ func TestW14_ConditionValueIsNotAVariable(t *testing.T) {
 	requireQuiet(t, rep, "W14")
 }
 
+// W18: a `contains` matches a word that STARTS with the alternative, so a
+// longer alternative beside a shorter one is dead weight. It is worth saying
+// out loud, because a dead entry is the author believing they covered a case
+// the short root was already swallowing.
+func TestW18_AlternativeCoveredByAShorterOne(t *testing.T) {
+	rep := lintSkill(t, wf(`  steps:
+    - name: pick
+      when: "input contains жир | жира | тикет"
+      set: {var: source, value: tickets}
+`))
+	f := requireFinding(t, rep, "W18", lint.SeverityWarn)
+	assert.Contains(t, f.Message, "жира")
+	assert.Contains(t, f.Message, "жир")
+}
+
+func TestW18_DuplicateAlternative(t *testing.T) {
+	rep := lintSkill(t, wf(`  steps:
+    - if:
+        cond: "input contains wiki | вики | wiki"
+        then:
+          - name: pick
+            set: {var: source, value: wiki}
+`))
+	f := requireFinding(t, rep, "W18", lint.SeverityWarn)
+	assert.Contains(t, f.Message, "listed twice")
+	assert.Len(t, findAll(rep, "W18"), 1, "one dead entry, one finding")
+}
+
+// Alternatives that genuinely cover different words stay quiet — a rule that
+// fires on a working dictionary is a rule people turn off.
+func TestW18_IndependentAlternativesAreQuiet(t *testing.T) {
+	rep := lintSkill(t, wf(`  steps:
+    - name: pick
+      when: "input contains вики | wiki | confluence | тикет | задач | jira"
+      set: {var: source, value: any}
+`))
+	requireQuiet(t, rep, "W18")
+}
+
+// A condition with nothing to look for can never fire. It is refused by the
+// engine's own validation rather than reported as advice — and the linter must
+// still surface it, through W1.
+func TestContainsWithoutAlternativesIsRefused(t *testing.T) {
+	rep := lintSkill(t, wf(`  steps:
+    - name: pick
+      when: "input contains"
+      set: {var: source, value: any}
+`))
+	f := requireFinding(t, rep, "W1", lint.SeverityError)
+	assert.Contains(t, f.Message, "without anything to look for")
+}
+
 // References hide in every corner of a step, not only in the instruction: an
 // argument at any depth, a condition, a computed server, the value put in place
 // of an empty result.

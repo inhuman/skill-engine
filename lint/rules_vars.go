@@ -39,6 +39,7 @@ func (r *run) workflowVarRefs(flow *skillengine.Flow) {
 			s := &steps[i]
 
 			r.switchVarIsAName(s, i)
+			r.containsAlternatives(s, i)
 
 			// READING first, writing after: a step does not see its own result,
 			// so `{{x}}` in the very step that declares `save_as: x` is a
@@ -153,6 +154,61 @@ func condOf(i *skillengine.If) string {
 		return ""
 	}
 	return i.Cond
+}
+
+// W18 — an alternative of a `contains` condition that can never matter.
+//
+// A `contains` matches a word that STARTS with the alternative, which is what
+// lets a dictionary hold roots instead of every inflected form. The same
+// property makes a longer alternative dead weight beside a shorter one:
+// anything `жира` finds, `жир` has already found. A duplicate is the same
+// mistake with the two spellings equal.
+//
+// Worth reporting rather than ignoring, because a dead alternative is almost
+// never a harmless extra — it is the author believing they have covered a case
+// that the shorter root was already swallowing, and it hides the real question:
+// is that root short enough to collide with words nobody meant?
+//
+// The two cases the format could get wrong here are already closed elsewhere:
+// a condition with NO alternatives is refused by the engine's own validation
+// (there is nothing to look for, so it can never fire), and a condition naming
+// a variable that does not exist at that point is W14.
+func (r *run) containsAlternatives(s *skillengine.Step, idx int) {
+	for _, cond := range []string{s.When, condOf(s.If)} {
+		if cond == "" {
+			continue
+		}
+		alts, ok := skillengine.CondContains(cond)
+		if !ok {
+			continue
+		}
+		for i, long := range alts {
+			for j, short := range alts {
+				if i == j || !covers(short, long) {
+					continue
+				}
+				// Equal spellings: report the later one, once.
+				if len(short) == len(long) && j > i {
+					continue
+				}
+				if strings.EqualFold(short, long) {
+					r.add("W18", SeverityWarn, "step `%s`: in `contains`, the alternative `%s` is listed twice — "+
+						"the second one can never matter", stepLabel(s, idx), long)
+					break
+				}
+				r.add("W18", SeverityWarn, "step `%s`: in `contains`, the alternative `%s` can never matter — "+
+					"`%s` already finds every word it does (a match starts at a word's start and is free at "+
+					"its end). Drop it, or shorten `%s` to what was actually meant",
+					stepLabel(s, idx), long, short, short)
+				break
+			}
+		}
+	}
+}
+
+// covers reports whether finding short also finds long: long starts with short.
+func covers(short, long string) bool {
+	return len(short) <= len(long) && strings.EqualFold(long[:len(short)], short)
 }
 
 // W17 — `switch.var` is given a template instead of a name.
