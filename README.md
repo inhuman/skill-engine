@@ -144,8 +144,8 @@ Two properties are worth knowing before you write a dictionary:
   `research`). Note that Go's `\b` is ASCII-only and would not have helped here
   at all;
 - the **end is free**, so an alternative matches a word that starts with it.
-  That is what lets a dictionary hold ROOTS — `жир` finds `жиру`, `жире`,
-  `жира` — and a dictionary of roots is why the format needs no stemming, which
+  That is what lets a dictionary hold ROOTS — `заказ` finds `заказы`, `заказа`,
+  `заказу` — and a dictionary of roots is why the format needs no stemming, which
   would be a guess about a language the engine does not know. The cost: a
   too-short root collides (`ком` finds `компонентах`), and the linter's W18
   warns when one alternative is already covered by a shorter one.
@@ -312,6 +312,41 @@ more cheaply than a run does. `Flow.Validate` is called before execution and
 rejects what used to be reported as success; every new such class is closed off
 by a check in validation rather than by a paragraph here. Running it over
 descriptions before execution is worth it too — in CI, when a skill is written.
+
+## The library ships no words
+
+An agent about a kitchen, one about a car fleet and one about a warehouse share
+this format and nothing else — not a domain, not a house style, not a language.
+So the engine knows only the words it WRITES itself: the failure markers it
+records (`ERROR:`, `DENIED:`) and the working-memory handle it defines
+(`[mem:id]`). Everything else is declared by whoever embeds it:
+
+```go
+deps := skillengine.Deps{
+    Runner: ..., Caller: ...,
+    Vocabulary: skillengine.Vocabulary{
+        // What YOUR model writes before naming its choice — used by `one_of`
+        // to lift a decision out of prose.
+        DecisionMarkers: []string{"Result:", "Résultat:", "结论:"},
+        // How YOUR host marks a result it shortened — stripped before a value
+        // reaches a tool argument, a loop or a condition.
+        TruncationNotes: []string{"[shortened:"},
+    },
+}
+```
+
+An empty field is not a mistake: it means "my application has no such words",
+and the mechanism that needed them steps aside. It never guesses. Leaving
+`DecisionMarkers` empty costs one of five ways `one_of` normalises an answer,
+and the narrowest one — an exact answer, a single value mentioned and a value
+mentioned strictly more often all work without any words at all. Markers decide
+only a tie, and there the result is empty rather than wrong; the step's trace
+then names the field, so a missing declaration is visible instead of being
+inferred from a quiet default.
+
+The same applies to the linter: `Options.EmptyWords` and
+`Options.FreeTextFields` carry the words W16 and W13 need, and without them
+those rules skip with a recorded reason rather than passing a skill as clean.
 
 ## Checking a skill before it runs
 

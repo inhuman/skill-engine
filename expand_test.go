@@ -174,11 +174,34 @@ func TestArgsGetCleanFullValue(t *testing.T) {
 	assert.Equal(t, `{"a":1,"b":2}`, args["stdin"], "whole, from memory, without the note")
 }
 
-// A host that still writes the Russian truncation note keeps working: the note
-// is a convention shared with the embedder, and dropping the old spelling would
-// silently put the tail back into call arguments.
-func TestArgsTrimLegacyRussianNote(t *testing.T) {
-	s := &state{vars: map[string]string{"findings": `{"a":1}` + "\n[обрезано: 42kb]"}}
+// A note the host DECLARED is stripped, whatever it says and whatever script it
+// is written in: the engine keeps no wording of its own, so this is the only way
+// it can tell a remark about the data from the data.
+func TestArgsTrimDeclaredHostNote(t *testing.T) {
+	for _, note := range []string{"[обрезано: 42kb]", "[gekürzt: 42kb]", "[shortened: 42kb]"} {
+		s := &state{
+			vars:  map[string]string{"findings": `{"a":1}` + "\n" + note},
+			vocab: Vocabulary{TruncationNotes: []string{"обрезано:", "gekürzt:", "shortened:"}},
+		}
+		args := s.expandArgs(map[string]any{"stdin": "{{findings}}"})
+		assert.Equal(t, `{"a":1}`, args["stdin"], note)
+	}
+}
+
+// An UNDECLARED note travels on into the argument — and that is the honest
+// outcome rather than a bug: the engine cannot tell somebody's remark from
+// somebody else's payload, and guessing at it would corrupt the data of every
+// host whose results legitimately end in a bracketed line.
+func TestArgsKeepAnUndeclaredNote(t *testing.T) {
+	s := &state{vars: map[string]string{"findings": `{"a":1}` + "\n[gekürzt: 42kb]"}}
+	args := s.expandArgs(map[string]any{"stdin": "{{findings}}"})
+	assert.Equal(t, `{"a":1}`+"\n[gekürzt: 42kb]", args["stdin"])
+}
+
+// The handle the FORMAT defines needs no declaration: the engine writes it and
+// resolves it, so it can recognise it.
+func TestArgsTrimTheFormatsOwnHandle(t *testing.T) {
+	s := &state{vars: map[string]string{"findings": `{"a":1}` + "\n[mem:res-3]"}}
 	args := s.expandArgs(map[string]any{"stdin": "{{findings}}"})
 	assert.Equal(t, `{"a":1}`, args["stdin"])
 }

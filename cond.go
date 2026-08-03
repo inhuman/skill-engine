@@ -115,7 +115,7 @@ func condAlternatives(list string) []string {
 //
 // The END of the match is deliberately NOT anchored: an alternative matches a
 // word that STARTS with it. That is what makes a dictionary of ROOTS work —
-// «жир» finds «жиру», «жире», «жира» — and a dictionary of roots is why this
+// «заказ» finds «заказы», «заказа», «заказу» — and a dictionary of roots is why this
 // engine needs no stemming, which would be a guess about a language it does not
 // know. The cost is that a too-short root collides: «ком» finds «компонентах».
 // That is a dictionary problem with a dictionary fix — a longer root — and the

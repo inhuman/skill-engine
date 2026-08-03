@@ -575,6 +575,12 @@ func (r *run) envelopeOf(s *skillengine.Step) (Envelope, bool) {
 // schema with a single field the request may genuinely not contain cannot make
 // it required (see W16) and could not leave it optional under this rule.
 func (r *run) workflowSchemas(flow *skillengine.Flow) {
+	// Only the NAME half of W13 needs words; the structural half — a string
+	// inside an array — is a runaway risk in any language and always runs.
+	if len(r.opts.FreeTextFields) == 0 && hasResponseSchema(flow) {
+		r.skip("W13", "the names that mark a field as free text are not configured; "+
+			"only fields inside arrays are checked")
+	}
 	handled := emptinessHandled(flow)
 	var scan func(node any, where, saveAs string, inArray bool)
 	scan = func(node any, where, saveAs string, inArray bool) {
@@ -592,7 +598,7 @@ func (r *run) workflowSchemas(flow *skillengine.Flow) {
 				// finding would point nowhere.
 				for _, field := range sortedKeys(props) {
 					sub, ok := props[field].(map[string]any)
-					if !ok || !freeTextField(sub) || !freeTextRisk(field, inArray) {
+					if !ok || !freeTextField(sub) || !r.freeTextRisk(field, inArray) {
 						continue
 					}
 					if _, has := sub["maxLength"]; !has {
@@ -685,6 +691,12 @@ func emptinessHandled(flow *skillengine.Flow) map[string]bool {
 // the live case and did not help: the instruction argues with itself, and it is
 // the model that executes.
 func (r *run) workflowRequiredSlots(flow *skillengine.Flow) {
+	if len(r.opts.EmptyWords) == 0 {
+		if hasResponseSchema(flow) {
+			r.skip("W16", "the words meaning \"empty\" are not configured")
+		}
+		return
+	}
 	var scan func(node any, step, instruction string)
 	scan = func(node any, step, instruction string) {
 		switch v := node.(type) {
@@ -700,9 +712,9 @@ func (r *run) workflowRequiredSlots(flow *skillengine.Flow) {
 				desc, _ := sub["description"].(string)
 				where := fieldMention(instruction, field, sortedKeys(props))
 				switch {
-				case emptyAllowed(desc):
+				case r.emptyAllowed(desc):
 					r.requiredSlot(step, field, desc)
-				case emptyAllowed(where):
+				case r.emptyAllowed(where):
 					r.requiredSlot(step, field, where)
 				}
 			}
@@ -733,19 +745,27 @@ func (r *run) requiredSlot(step, field, quote string) {
 		step, field, squeeze(quote))
 }
 
-// emptyAllowedRe — the description permits the field to be empty. It looks for
+// emptyAllowed — the description permits the field to be empty. It looks for
 // EMPTINESS specifically: "not named — 30" is a default, a legal output, and
 // the rule stays quiet about it.
 //
-// The start of the word is checked by hand: `\b` in Go is ASCII-only and does
-// not work on Cyrillic, and without a boundary "пуст" is found inside
-// "перезапустить" — a false finding this rule produced on its very first run.
-// Both languages are matched: skills are written in the language of whoever
-// writes them, and a rule that only reads one of them silently stops working
-// for half the catalogue.
-var emptyAllowedRe = regexp.MustCompile(`(?i)(^|[^\p{L}])(пуст|empty)`)
-
-func emptyAllowed(s string) bool { return emptyAllowedRe.MatchString(s) }
+// The words come from the embedder (Options.EmptyWords): skills are written in
+// the language of whoever writes them, and a list baked into the library would
+// silently do nothing for everyone who writes in another one.
+//
+// A match must start a word, and that check is the engine's — the same one
+// behind the `contains` condition, so there is ONE definition of "starts a
+// word" rather than two that drift. It matters here: without it "пуст" is found
+// inside "перезапустить", which is a false finding this rule produced on its
+// very first run. (Go's own `\b` is ASCII-only and would not have helped.)
+func (r *run) emptyAllowed(s string) bool {
+	for _, w := range r.opts.EmptyWords {
+		if skillengine.ContainsWord(s, w) {
+			return true
+		}
+	}
+	return false
+}
 
 // fieldMention — the part of an instruction that describes a field.
 //
@@ -811,16 +831,13 @@ func startsAnotherField(line, field string, siblings []string) bool {
 //   - the field sits inside an ARRAY: many entries, each with its own text, and
 //     breaking off on one takes the whole document;
 //   - a name behind which stands FREE text rather than a value.
-func freeTextRisk(name string, inArray bool) bool {
+func (r *run) freeTextRisk(name string, inArray bool) bool {
 	if inArray {
 		return true
 	}
 	low := strings.ToLower(name)
-	for _, marker := range []string{
-		"message", "text", "summary", "description", "reason", "answer",
-		"comment", "explanation", "details", "note", "body", "rationale",
-	} {
-		if strings.Contains(low, marker) {
+	for _, marker := range r.opts.FreeTextFields {
+		if strings.Contains(low, strings.ToLower(marker)) {
 			return true
 		}
 	}
@@ -941,4 +958,17 @@ func sortedKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// hasResponseSchema reports whether any step declares a structured answer —
+// asked before a rule files a skip, so a skill with no schemas does not collect
+// notes about rules that had nothing to do.
+func hasResponseSchema(flow *skillengine.Flow) bool {
+	found := false
+	walkSteps(flow.Steps, func(s *skillengine.Step, _ int) {
+		if s.Run != nil && len(s.Run.ResponseSchema) > 0 {
+			found = true
+		}
+	})
+	return found
 }

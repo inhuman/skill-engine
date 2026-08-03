@@ -29,6 +29,11 @@ type Deps struct {
 	// Optional: nil = fields are only available on a result that was not
 	// truncated.
 	Memory MemoryReader
+	// Vocabulary — the words of THIS application. The engine ships none of its
+	// own: agents that share this format do not share a language, a domain or a
+	// house style, and a word list baked in here would be one application's
+	// habit imposed on everyone else's. See the Vocabulary type.
+	Vocabulary Vocabulary
 	// OnStepStart is called BEFORE a step. Needed by anyone showing work to a
 	// human: a step that runs for 14 seconds emits no event until it
 	// finishes, and there is nothing to show all that time.
@@ -108,6 +113,7 @@ func newState(f *Flow, deps Deps, vars map[string]string) (*state, error) {
 		runner: deps.Runner, caller: deps.Caller, delegate: deps.Delegate,
 		onStep: deps.OnStep, onStepStart: deps.OnStepStart,
 		assets: f.Assets, assetsRes: deps.Assets, memory: deps.Memory,
+		vocab:      deps.Vocabulary,
 		assetCache: map[string]string{}, seeded: map[string]bool{}}
 	for k, v := range f.Vars {
 		st.vars[k] = v
@@ -141,6 +147,8 @@ type state struct {
 	assets    map[string]Asset
 	assetsRes AssetResolver
 	memory    MemoryReader
+	// vocab — the embedding application's words (see Vocabulary).
+	vocab Vocabulary
 	// assetCache — content already fetched in THIS turn: one asset consumed by
 	// three steps is fetched once.
 	assetCache map[string]string

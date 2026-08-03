@@ -209,21 +209,21 @@ func TestW14_ConditionValueIsNotAVariable(t *testing.T) {
 func TestW18_AlternativeCoveredByAShorterOne(t *testing.T) {
 	rep := lintSkill(t, wf(`  steps:
     - name: pick
-      when: "input contains жир | жира | тикет"
-      set: {var: source, value: tickets}
+      when: "input contains заказ | заказы | десерт"
+      set: {var: course, value: order}
 `))
 	f := requireFinding(t, rep, "W18", lint.SeverityWarn)
-	assert.Contains(t, f.Message, "жира")
-	assert.Contains(t, f.Message, "жир")
+	assert.Contains(t, f.Message, "заказы")
+	assert.Contains(t, f.Message, "заказ")
 }
 
 func TestW18_DuplicateAlternative(t *testing.T) {
 	rep := lintSkill(t, wf(`  steps:
     - if:
-        cond: "input contains wiki | вики | wiki"
+        cond: "input contains чай | кофе | чай"
         then:
           - name: pick
-            set: {var: source, value: wiki}
+            set: {var: course, value: drink}
 `))
 	f := requireFinding(t, rep, "W18", lint.SeverityWarn)
 	assert.Contains(t, f.Message, "listed twice")
@@ -235,8 +235,8 @@ func TestW18_DuplicateAlternative(t *testing.T) {
 func TestW18_IndependentAlternativesAreQuiet(t *testing.T) {
 	rep := lintSkill(t, wf(`  steps:
     - name: pick
-      when: "input contains вики | wiki | confluence | тикет | задач | jira"
-      set: {var: source, value: any}
+      when: "input contains десерт | сладк | напит | чай | кофе | салат"
+      set: {var: course, value: any}
 `))
 	requireQuiet(t, rep, "W18")
 }
@@ -248,7 +248,7 @@ func TestContainsWithoutAlternativesIsRefused(t *testing.T) {
 	rep := lintSkill(t, wf(`  steps:
     - name: pick
       when: "input contains"
-      set: {var: source, value: any}
+      set: {var: course, value: any}
 `))
 	f := requireFinding(t, rep, "W1", lint.SeverityError)
 	assert.Contains(t, f.Message, "without anything to look for")

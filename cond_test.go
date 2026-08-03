@@ -8,35 +8,35 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The dictionary a live classifier step carries in its own text. Kept as test
-// data because that is what the condition replaces: the mapping was always
-// deterministic, the model was only applying it.
-var sourceWords = map[string]string{
-	"wiki":    "вики | wiki | confluence",
-	"tickets": "тикет | задач | jira | жир",
-	"cluster": "кластер | под | k8s | куб",
-	"repo":    "репозитор | код | merge request | MR",
-	"metrics": "метрик | latency | rps",
+// A dictionary of the kind a classifier step carries in its own text. The
+// domain is deliberately not this library's: the words belong to whoever writes
+// the skill, and an agent about a kitchen, a car fleet or a warehouse will
+// share none of them. What is tested is the mechanism.
+var courseWords = map[string]string{
+	"dessert": "десерт | сладк | пирог | dessert",
+	"main":    "горяч | второе | main course",
+	"drink":   "напит | коктейл | чай | чаю | чая | кофе | drink",
+	"starter": "закус | салат | starter",
 }
 
-// The words a request names are what the branch must follow. A model at
-// temperature 0 got 5 of 10 live requests right; the same dictionary applied
-// here gets them all, because there is nothing to get wrong.
+// The words a request names are what the branch must follow. This is the whole
+// value of the construct: a step that used to ask a model to apply a mapping it
+// already carried now applies it itself, and cannot get it wrong.
 func TestContainsFindsWhatTheRequestNamed(t *testing.T) {
 	for _, c := range []struct {
 		request string
 		want    []string
 	}{
-		{"поищи про релиз в вики и в жире", []string{"wiki", "tickets"}},
-		{"собери всё про релиз: тикеты, мержи, вики", []string{"wiki", "tickets"}},
-		{"что сломалось: логи подов, метрики и тикеты", []string{"tickets", "cluster", "metrics"}},
-		{"look it up in Confluence", []string{"wiki"}},
-		{"покажи latency за сутки", []string{"metrics"}},
+		{"подбери десерт и напиток", []string{"dessert", "drink"}},
+		{"что на второе, и салат бы", []string{"main", "starter"}},
+		{"хочу что-нибудь сладкое к чаю", []string{"dessert", "drink"}},
+		{"посоветуй что приготовить", nil},
+		{"a dessert, please", []string{"dessert"}},
 	} {
 		t.Run(c.request, func(t *testing.T) {
 			var got []string
-			for _, name := range []string{"wiki", "tickets", "cluster", "repo", "metrics"} {
-				if containsAny(c.request, condAlternatives(sourceWords[name])) {
+			for _, name := range []string{"dessert", "main", "drink", "starter"} {
+				if containsAny(c.request, condAlternatives(courseWords[name])) {
 					got = append(got, name)
 				}
 			}
@@ -50,7 +50,7 @@ func TestContainsFindsWhatTheRequestNamed(t *testing.T) {
 func TestContainsDoesNotMatchInsideAWord(t *testing.T) {
 	assert.False(t, ContainsWord("просят перезапустить сервис", "пуст"),
 		"«пуст» found inside «перезапустить» — the burn this default exists for")
-	assert.False(t, ContainsWord("сходи в репозиторий", "поз"),
+	assert.False(t, ContainsWord("подай десерт", "дай"),
 		"a root found in the middle of a word")
 	assert.False(t, ContainsWord("research the topic", "search"),
 		"`search` found inside `research` — the same class in ASCII")
@@ -60,26 +60,26 @@ func TestContainsDoesNotMatchInsideAWord(t *testing.T) {
 // the root, and the engine does not guess at a language it does not know. So a
 // match is anchored at the word's START and free at its end.
 func TestContainsFindsRoots(t *testing.T) {
-	for _, form := range []string{"жиру", "жире", "жира", "жир"} {
-		assert.Truef(t, ContainsWord("посмотри в "+form, "жир"), "the root did not find %q", form)
+	for _, form := range []string{"заказ", "заказы", "заказа", "заказу", "заказами"} {
+		assert.Truef(t, ContainsWord("посмотри "+form, "заказ"), "the root did not find %q", form)
 	}
-	assert.True(t, ContainsWord("несколько тикетов", "тикет"))
-	assert.True(t, ContainsWord("по метрикам за час", "метрик"))
+	assert.True(t, ContainsWord("несколько десертов", "десерт"))
+	assert.True(t, ContainsWord("два коктейля", "коктейл"))
 }
 
 // Requests are written by people, in whatever case and whatever script.
 func TestContainsIsCaseInsensitiveBeyondASCII(t *testing.T) {
-	assert.True(t, ContainsWord("СМОТРИ В ВИКИ", "вики"))
-	assert.True(t, ContainsWord("смотри в вики", "ВИКИ"))
-	assert.True(t, ContainsWord("open Jira please", "jira"))
+	assert.True(t, ContainsWord("ХОЧУ ДЕСЕРТ", "десерт"))
+	assert.True(t, ContainsWord("хочу десерт", "ДЕСЕРТ"))
+	assert.True(t, ContainsWord("a Dessert please", "dessert"))
 	assert.True(t, ContainsWord("Ünicode Ärger", "ärger"))
 }
 
 // An alternative may be several words: «что мы знаем» is one entry of a live
 // dictionary, not three.
 func TestContainsHandlesMultiWordAlternatives(t *testing.T) {
-	assert.True(t, ContainsWord("напомни, что мы знаем про сервис", "что мы знаем"))
-	assert.False(t, ContainsWord("что мы знали", "что мы знаем"))
+	assert.True(t, ContainsWord("напомни, что мы брали в прошлый раз", "что мы брали"))
+	assert.False(t, ContainsWord("что мы брали бы", "что мы брали в"))
 }
 
 // An alternative that does not itself begin with a letter has no word start to
@@ -90,26 +90,26 @@ func TestContainsAnchorsOnlyWhereThereIsAWordStart(t *testing.T) {
 }
 
 func TestConditionAlternatives(t *testing.T) {
-	assert.Equal(t, []string{"вики", "wiki", "confluence"}, condAlternatives(" вики | wiki |confluence "))
-	assert.Equal(t, []string{"что мы знаем", "граф"}, condAlternatives("что мы знаем | граф"))
+	assert.Equal(t, []string{"десерт", "сладкое", "dessert"}, condAlternatives(" десерт | сладкое |dessert "))
+	assert.Equal(t, []string{"что мы брали", "заказ"}, condAlternatives("что мы брали | заказ"))
 	assert.Equal(t, []string{"a", "b"}, condAlternatives(`"a" | 'b'`), "quotes are stripped as in an equality")
 	assert.Equal(t, []string{"a", "b"}, condAlternatives("a | | b"), "an empty piece is a slip, not a match-all")
 	assert.Empty(t, condAlternatives("  |  "))
 }
 
 func TestParseContainsCondition(t *testing.T) {
-	name, op, want, err := parseCond("input contains вики | wiki")
+	name, op, want, err := parseCond("input contains десерт | сладк")
 	require.NoError(t, err)
 	assert.Equal(t, "input", name)
 	assert.Equal(t, "contains", op)
-	assert.Equal(t, []string{"вики", "wiki"}, condAlternatives(want))
+	assert.Equal(t, []string{"десерт", "сладк"}, condAlternatives(want))
 
-	name, op, _, err = parseCond("req.text not contains жир")
+	name, op, _, err = parseCond("req.text not contains заказ")
 	require.NoError(t, err)
 	assert.Equal(t, "req.text", name)
 	assert.Equal(t, "not contains", op)
 
-	got, ok := CondVar("input contains вики | wiki")
+	got, ok := CondVar("input contains десерт | сладк")
 	require.True(t, ok, "a reader of the description must get the variable from the engine")
 	assert.Equal(t, "input", got)
 }
@@ -140,34 +140,34 @@ func TestContainsBranchesInAFlow(t *testing.T) {
 	f := parseFlow(t, `
 steps:
   - if:
-      cond: "input contains вики | wiki | confluence"
+      cond: "input contains десерт | сладк"
       then:
-        - set: {var: sources, value: "wiki"}
+        - set: {var: course, value: "dessert"}
       else:
-        - set: {var: sources, value: "none"}
+        - set: {var: course, value: "none"}
   - name: answer
-    when: "input contains тикет | жир | jira"
-    set: {var: also, value: "tickets"}
+    when: "input contains напит | чай | кофе"
+    set: {var: also, value: "drink"}
 `)
 	vars, _, err := ExecuteWith(context.Background(), f, Deps{},
-		map[string]string{"input": "поищи про релиз в Вики и в жире"})
+		map[string]string{"input": "хочу Десерт и чай"})
 	require.NoError(t, err)
-	assert.Equal(t, "wiki", vars["sources"])
-	assert.Equal(t, "tickets", vars["also"], "`when` reads the same grammar")
+	assert.Equal(t, "dessert", vars["course"])
+	assert.Equal(t, "drink", vars["also"], "`when` reads the same grammar")
 }
 
 func TestNotContainsBranches(t *testing.T) {
 	f := parseFlow(t, `
 steps:
   - if:
-      cond: "input not contains вики | wiki"
+      cond: "input not contains десерт | сладк"
       then:
         - set: {var: route, value: "ask"}
       else:
-        - set: {var: route, value: "wiki"}
+        - set: {var: route, value: "dessert"}
 `)
 	vars, _, err := ExecuteWith(context.Background(), f, Deps{},
-		map[string]string{"input": "что там по метрикам"})
+		map[string]string{"input": "что на второе"})
 	require.NoError(t, err)
 	assert.Equal(t, "ask", vars["route"])
 }
@@ -180,14 +180,14 @@ func TestConditionReadsTheWholeValue(t *testing.T) {
 	f := parseFlow(t, `
 steps:
   - if:
-      cond: "report contains кластер"
+      cond: "report contains пригорел"
       then:
         - set: {var: found, value: "yes"}
       else:
         - set: {var: found, value: "no"}
 `)
 	vars, _, err := ExecuteWith(context.Background(), f,
-		Deps{Memory: fakeMemory{"res-1": "первая строка\nупал кластер staging\nхвост"}},
+		Deps{Memory: fakeMemory{"res-1": "первая строка\nсоус пригорел\nхвост"}},
 		map[string]string{"report": "первая строка\n[mem:res-1]"})
 	require.NoError(t, err)
 	assert.Equal(t, "yes", vars["found"], "the condition judged the preview instead of the value")

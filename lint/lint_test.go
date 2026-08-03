@@ -45,6 +45,14 @@ func testOptions() lint.Options {
 		ReadOnlyRoles:    []string{"reader"},
 		ImplicitBuiltins: []string{"memory"},
 		HostVars:         []string{"input"},
+		// The words of an imaginary embedder. The library ships none, so a test
+		// that wants these rules must say what its authors write — in this case
+		// in two languages, which is also how the mechanism gets exercised.
+		EmptyWords: []string{"empty", "пуст"},
+		FreeTextFields: []string{
+			"message", "text", "summary", "description", "reason",
+			"answer", "comment", "explanation", "details", "note",
+		},
 		Envelopes: []lint.Envelope{{
 			Server:  "runner",
 			Fields:  []string{"exit_code", "stdout", "stderr"},

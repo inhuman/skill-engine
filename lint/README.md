@@ -66,9 +66,25 @@ deliberate: a linter that falls over because a dependency is down is a linter
 people stop running, and a partial check that looks like a clean one is worse
 than no check at all.
 
-The same applies to the vocabulary in `Options`: the format deliberately leaves
-asset kinds, roles and calling conventions to the application, so the rules
-about them stay off — loudly — until you say what you call things.
+The same applies to the vocabulary in `Options` — and the library ships none of
+it. The format deliberately leaves asset kinds, roles and calling conventions to
+the application, and the WORDS a rule looks for belong to the application too:
+
+```go
+opts := lint.Options{
+    Unmarshal: yaml.Unmarshal,
+    // How your authors write "empty" in an instruction (W16).
+    EmptyWords: []string{"empty", "пуст", "vide"},
+    // Name fragments that mark a schema field as free text rather than a slot
+    // (W13). Its structural half — a string inside an ARRAY — needs no words.
+    FreeTextFields: []string{"message", "summary", "description", "raison"},
+}
+```
+
+Every one of these stays off — loudly, as a recorded skip — until you say what
+you call things. A rule that quietly reports nothing because nobody configured
+it is indistinguishable from a clean skill, which is the one outcome this
+package refuses to produce.
 
 ## The rules
 
@@ -90,10 +106,10 @@ about them stay off — loudly — until you say what you call things.
 | W10 | error | `from:` in a call's arguments receives a handle, not the value's text | — |
 | W11 | warn | an asset's `params` are keys the resolver actually reads | `Options.Assets` |
 | W12 | warn | an instruction names a tool without saying how tools are called | `Options.CallProtocol`, `Facts.AllTools` |
-| W13 | warn | a free-text field of a response schema has a length ceiling | — |
+| W13 | warn | a free-text field of a response schema has a length ceiling | `Options.FreeTextFields` (fields inside arrays need no vocabulary) |
 | W14 | error | every reference names a variable that exists at that point in the flow | — |
 | W15 | error | a declared built-in tool exists in the registry | `Facts.BuiltinTools` |
-| W16 | error | a required field is not one the description beside it allows to be empty | — |
+| W16 | error | a required field is not one the description beside it allows to be empty | `Options.EmptyWords` |
 | W17 | error | `switch.var` is given a variable's name, not a `{{template}}` | — |
 | W18 | warn | no alternative of a `contains` is already covered by a shorter one | — |
 | E1 | error | every server the skill declares is registered | `Facts.ServerNames` |

@@ -81,7 +81,7 @@ func (s *state) expandForArgs(text string) string {
 // has to say which of the two it wants — `expand` for the model, this for
 // everyone else. A guard test keeps it that way.
 func (s *state) payload(name string) string {
-	return trimHostNote(s.fullValue(s.lookup(name)))
+	return trimHostNote(s.fullValue(s.lookup(name)), s.vocab.TruncationNotes)
 }
 
 // asset returns a payload's content, fetching it on first use.
@@ -156,7 +156,7 @@ func (s *state) lookup(name string) string {
 // for.
 func (s *state) objectOf(raw string) (map[string]any, bool) {
 	var obj map[string]any
-	if err := json.Unmarshal([]byte(trimHostNote(raw)), &obj); err == nil {
+	if err := json.Unmarshal([]byte(trimHostNote(raw, s.vocab.TruncationNotes)), &obj); err == nil {
 		return obj, true
 	}
 	id := memHandle(raw)
@@ -193,25 +193,27 @@ func (s *state) fullValue(raw string) string {
 	return full
 }
 
-// truncationNotes — how the host marks a truncated result. The Russian
-// "обрезано:" is kept alongside the English marker on purpose: this is a
-// convention shared with the embedding application, and dropping the old
-// spelling would silently stop trimming the note for hosts that still write
-// it — which puts the tail back into call arguments (see expandForArgs).
-var truncationNotes = []string{"mem:", "truncated:", "обрезано:"}
+// handleNote — the ONE note the format defines itself: the working-memory
+// handle "[mem:id]" that MemoryReader resolves. Everything else a host appends
+// to a result is the host's own wording, and it arrives through
+// Vocabulary.TruncationNotes.
+const handleNote = "mem:"
 
 // trimHostNote strips the note the host appends to a tool result: "[mem:id]"
-// for a whole one and "…[mem:id — this is a PREVIEW…]"/"…[truncated: …]" for a
-// large one. The note is always the last line — that is what gets cut, leaving
-// the content untouched.
-func trimHostNote(s string) string {
+// for a whole one and "…[mem:id — this is a PREVIEW…]" or the host's own
+// "…[<note>]" for a large one. The note is always the last line — that is what
+// gets cut, leaving the content untouched.
+func trimHostNote(s string, notes []string) string {
 	i := strings.LastIndex(s, "\n[")
 	if i < 0 {
 		return s
 	}
 	tail := s[i+2:]
-	for _, note := range truncationNotes {
-		if strings.HasPrefix(tail, note) {
+	if strings.HasPrefix(tail, handleNote) {
+		return strings.TrimSuffix(strings.TrimSpace(s[:i]), "…")
+	}
+	for _, note := range notes {
+		if note != "" && strings.HasPrefix(tail, note) {
 			return strings.TrimSuffix(strings.TrimSpace(s[:i]), "…")
 		}
 	}
@@ -315,7 +317,7 @@ func (s *state) expandAny(v any) any {
 // the chosen one ("decide between t1 and foreign… Result: foreign"), so the
 // first match is the enumeration, not the decision. Same trick as lifting a
 // verdict out of reasoning.
-func normalizeOneOf(text string, allowed []string) string {
+func normalizeOneOf(text string, allowed, markers []string) string {
 	if len(allowed) == 0 {
 		return text
 	}
@@ -332,7 +334,7 @@ func normalizeOneOf(text string, allowed []string) string {
 	// 2. The value after a decision marker. A model told to answer in one word
 	//    still writes "Summary: … Result: foreign" — take what stands AFTER
 	//    the marker rather than the last thing in the text.
-	if v, ok := afterDecisionMarker(trimmed, allowed); ok {
+	if v, ok := afterDecisionMarker(trimmed, allowed, markers); ok {
 		return v
 	}
 
@@ -358,19 +360,14 @@ func normalizeOneOf(text string, allowed []string) string {
 	return ""
 }
 
-// decisionMarkers — words after which a model names its choice.
-//
-// Both languages are listed, and the list is not a place to economise: a
-// missing marker costs a wrong branch, while an extra one costs nothing.
-var decisionMarkers = []string{
-	"result:", "summary:", "answer:", "conclusion:", "choice:", "decision:", "verdict:",
-	"результат:", "итог:", "ответ:", "вывод:", "выбор:", "решение:",
-}
-
-func afterDecisionMarker(text string, allowed []string) (string, bool) {
+func afterDecisionMarker(text string, allowed, markers []string) (string, bool) {
+	if len(markers) == 0 {
+		return "", false
+	}
 	low := strings.ToLower(text)
 	at := -1
-	for _, m := range decisionMarkers {
+	for _, m := range markers {
+		m = strings.ToLower(m)
 		if i := strings.LastIndex(low, m); i > at {
 			at = i + len(m)
 		}

@@ -439,11 +439,11 @@ func TestNormalizeOneOf(t *testing.T) {
 	allowed := []string{"t1", "foreign"}
 	// Options enumerated before the choice: the LAST occurrence is taken.
 	assert.Equal(t, "foreign",
-		normalizeOneOf("we must decide between t1 and foreign; this one is foreign", allowed))
-	assert.Equal(t, "t1", normalizeOneOf("t1", allowed))
-	assert.Equal(t, "foreign", normalizeOneOf("FOREIGN", allowed), "case does not matter")
-	assert.Empty(t, normalizeOneOf("could not determine", allowed), "nothing found — empty")
-	assert.Equal(t, "as is", normalizeOneOf("as is", nil), "without one_of the text is left alone")
+		normalizeOneOf("we must decide between t1 and foreign; this one is foreign", allowed, markers))
+	assert.Equal(t, "t1", normalizeOneOf("t1", allowed, markers))
+	assert.Equal(t, "foreign", normalizeOneOf("FOREIGN", allowed, markers), "case does not matter")
+	assert.Empty(t, normalizeOneOf("could not determine", allowed, markers), "nothing found — empty")
+	assert.Equal(t, "as is", normalizeOneOf("as is", nil, markers), "without one_of the text is left alone")
 }
 
 // A step without save_as is the final answer, not discarded work: its text must

@@ -196,7 +196,7 @@ func (s *state) runStep(ctx context.Context, step Step) (bool, error) {
 
 	// The value, not the raw text: with `one_of` an ambiguous answer produces
 	// text and stores nothing, and it is the stored value that flows on.
-	value := normalizeOneOf(res.Text, run.OneOf)
+	value := normalizeOneOf(res.Text, run.OneOf, s.vocab.DecisionMarkers)
 	policy, replacement := emptyPolicyOf(step)
 	calls, failed := res.Calls, res.CallsFailed
 
@@ -214,8 +214,19 @@ func (s *state) runStep(ctx context.Context, step Step) (bool, error) {
 				return s.onError(step, aerr)
 			}
 			res.Note = again.Note
-			value = normalizeOneOf(again.Text, run.OneOf)
+			value = normalizeOneOf(again.Text, run.OneOf, s.vocab.DecisionMarkers)
 		}
+	}
+
+	// A `one_of` step that produced text and stored nothing, in an application
+	// that declared no decision markers, is the one case where the missing
+	// declaration COULD be the cause. Saying so is the difference between a
+	// visible gap and a quiet default: without this the embedder sees a step
+	// that "sometimes decides", and the reason is a field they never filled in.
+	if isBlankResult(value) && len(run.OneOf) > 0 && strings.TrimSpace(res.Text) != "" &&
+		len(s.vocab.DecisionMarkers) == 0 {
+		res.Note = "the answer was prose and Vocabulary.DecisionMarkers is empty — " +
+			"the engine has no words to find a decision by"
 	}
 
 	if isBlankResult(value) {

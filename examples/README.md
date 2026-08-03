@@ -24,4 +24,4 @@ parsing is worse than a missing one — it teaches the wrong thing.
 | [`contract.yaml`](contract.yaml) | checking a contract | `if` + `exit` (wrong document — an honest exit) and an external asset with a `fetch` policy |
 | [`triage.yaml`](triage.yaml) | triaging an incident | a composite skill: branching and delegation |
 | [`audit.yaml`](audit.yaml) | checking a document | `profiles` shared by the classifier steps, and all four `on_empty` outcomes |
-| [`sources.yaml`](sources.yaml) | answering from the named sources | `contains` — a classifier step replaced by a condition, dictionary and all |
+| [`menu.yaml`](menu.yaml) | suggesting dishes by section | `contains` — a classifier step replaced by a condition, dictionary and all |

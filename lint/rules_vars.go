@@ -161,7 +161,7 @@ func condOf(i *skillengine.If) string {
 // A `contains` matches a word that STARTS with the alternative, which is what
 // lets a dictionary hold roots instead of every inflected form. The same
 // property makes a longer alternative dead weight beside a shorter one:
-// anything `жира` finds, `жир` has already found. A duplicate is the same
+// anything `заказы` finds, `заказ` has already found. A duplicate is the same
 // mistake with the two spellings equal.
 //
 // Worth reporting rather than ignoring, because a dead alternative is almost

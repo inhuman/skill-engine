@@ -264,6 +264,27 @@ type Options struct {
 	// skill is not required to declare them, and E5 does not ask it to.
 	ImplicitBuiltins []string
 
+	// EmptyWords — how the authors of THIS installation write "empty" in an
+	// instruction or a field's description: "empty", "пустая строка", "vide".
+	// W16 needs them to spot a required field the text beside it allows to be
+	// empty. Matched case-insensitively at the start of a word, so a stem is
+	// enough ("пуст" covers «пустая», «пусто»).
+	//
+	// The library ships none: agents sharing this format do not share a
+	// language, and a list baked in here would silently do nothing for whoever
+	// writes in another one. Empty → W16 does not run, and says so.
+	EmptyWords []string
+
+	// FreeTextFields — name fragments that mark a schema field as FREE TEXT
+	// rather than a slot: "message", "summary", "описание", "raison". W13 uses
+	// them to ask for a length ceiling only where an answer can run away —
+	// demanding one from `id` or `env` would be noise.
+	//
+	// The structural half of W13 needs no words and always runs: a string field
+	// inside an ARRAY is a runaway risk whatever it is called. Empty → only
+	// that half runs, and the rule says so.
+	FreeTextFields []string
+
 	// HostVars — variables the embedding application puts into the flow before
 	// the first step (the request, the history). A skill does not declare them
 	// and is free to read them; W14 would otherwise report every one of them as

@@ -943,8 +943,8 @@ $defs:
               «перезапустить», `search` inside `research`.
             - the END is deliberately free, so an alternative matches a word
               that STARTS with it. That is what makes a dictionary of ROOTS
-              work — «жир» finds «жиру», «жире», «жира» — and a dictionary of
-              roots is why this format needs no stemming, which would be a guess
+              work — «заказ» finds «заказы», «заказа», «заказу» — and a dictionary
+              of roots is why this format needs no stemming, which would be a guess
               about a language the engine does not know. The cost: a too-short
               root collides («ком» finds «компонентах»), and the fix is a longer
               root, not an option.

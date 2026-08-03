@@ -46,8 +46,8 @@ it and refusing the condition it cannot parse.
   author will not think about it while a false match is nearly impossible to
   debug: the condition looks right. (Go's `\b` is ASCII-only and does not work
   on Cyrillic at all.) The END is deliberately free, so an alternative matches a
-  word that starts with it: that is what lets a dictionary hold ROOTS — «жир»
-  finds «жиру», «жире», «жира» — and a dictionary of roots is why the format
+  word that starts with it: that is what lets a dictionary hold ROOTS — «заказ»
+  finds «заказы», «заказа», «заказу» — and a dictionary of roots is why the format
   needs no stemming, which would be a guess about a language the engine does not
   know. The cost is that a too-short root collides, and the linter's W18 warns
   when one alternative is already covered by a shorter one.
