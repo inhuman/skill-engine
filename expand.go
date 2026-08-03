@@ -513,16 +513,40 @@ func isWordBoundary(text string, i int) bool {
 // result of a `save_as: pods` step puts the handle into `pods.mem`.
 const MemSuffix = ".mem"
 
-// memRefRe catches a working-memory handle in result text. The "[mem:id]" form
-// is a convention shared by the host and the engine: that is how the handle is
-// seen both by the model in a preview and by the skill in substitution. Parsed
-// out of text rather than added to an interface, because the handle is meant
-// to be read from text in the first place.
-var memRefRe = regexp.MustCompile(`\[mem:([a-zA-Z0-9_-]+)`)
+// memRefRe catches the working-memory handle the host appends to a result. The
+// "[mem:id]" form is a convention shared by the host and the engine: that is how
+// the handle is seen both by the model in a preview and by the skill in
+// substitution. Parsed out of text rather than added to an interface, because
+// the handle is meant to be read from text in the first place.
+//
+// Anchored at the start of a line on purpose — see memHandle.
+var memRefRe = regexp.MustCompile(`^\[mem:([a-zA-Z0-9_-]+)`)
 
-// memHandle returns the working-memory handle from a tool result, if present.
+// memHandle returns the working-memory handle the host appended to a result.
+//
+// Read from the LAST LINE, which is where the host writes it — the same place
+// trimHostNote cuts. Searched anywhere in the text instead, it turns a
+// QUOTATION into a control marker, and a value that quotes arbitrary content
+// quotes everything: a diff, a log, a user's message.
+//
+// The live failure: a review step reading a diff of the very code that appends
+// these handles. The diff named one, the engine took it for the host's note,
+// went to working memory, found nothing — and reported a whole value as an
+// unreadable preview. Worse, with a real note present too, the FIRST match won:
+// `<var>.mem` ended up holding an id out of the data, and `{from: "{{var.mem}}"}`
+// would hand a tool whatever that id happened to resolve to. It looked like a
+// flake, because it depended on which chunk the quoting lines fell into.
+//
+// A last line that genuinely begins with the marker is still ambiguous in
+// principle, and unavoidably so: the convention is a text one. What is fixed
+// here is the far commoner half — a marker in the MIDDLE of quoted content is
+// now data, as it always was.
 func memHandle(text string) string {
-	if m := memRefRe.FindStringSubmatch(text); m != nil {
+	line := strings.TrimSpace(text)
+	if i := strings.LastIndex(line, "\n"); i >= 0 {
+		line = strings.TrimSpace(line[i+1:])
+	}
+	if m := memRefRe.FindStringSubmatch(line); m != nil {
 		return m[1]
 	}
 	return ""
