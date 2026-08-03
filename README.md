@@ -201,7 +201,9 @@ it is the stored value that flows on. It works on `call` steps too, except
   answer from. An empty `answer` = the program produced no answer.
 - `<name>.mem` — the working-memory handle of a result, ALWAYS, not only for
   large ones: `args: {stdin: {from: "{{tickets.mem}}"}}` sends the data past
-  the model's context.
+  the model's context. It is read from the value's LAST line, where the host
+  writes it: a `[mem:…]` quoted inside a diff, a log or a user's message is
+  data, not a marker.
 - `{{asset:name}}` substitutes an asset into TEXT (it passes through the
   context), `{from: "asset:name"}` — by REFERENCE (it does not).
 - **A step without tools reads a variable whole.** A large result reaches a

@@ -21,6 +21,34 @@ wrap skills in something of your own — front matter, a markdown body, several
 documents in one file — unwrap before calling and wrap the result back;
 anything else is refused rather than guessed at.
 
+## 2.2.2
+
+An engine fix; the format itself did not change.
+
+- **Fixed**: the working-memory handle was looked for ANYWHERE in a value, while
+  the host writes it on the LAST line — the same place `trimHostNote` cuts. A
+  value that quotes arbitrary content quotes everything, so a diff, a log or a
+  user's message naming `[mem:…]` was read as a control marker.
+
+  Two failures came out of that, and the second one is older than 2.2.1:
+
+  - a toolless step was handed a value the engine believed to be an unreadable
+    preview, and was marked degraded although the value was whole all along. It
+    landed on exactly the repositories where this mechanism is implemented —
+    that is, on any embedder reviewing its own code — and looked like a flake,
+    because it depended on which chunk the quoting lines fell into;
+  - with a real note present as well, the FIRST match won: `<var>.mem` ended up
+    holding an id taken out of the data, so `{from: "{{var.mem}}"}` would hand a
+    tool whatever that id happened to resolve to.
+
+  A last line that genuinely begins with the marker stays ambiguous, and
+  unavoidably so — the convention is a textual one. What is fixed is the far
+  commoner half: a marker in the MIDDLE of quoted content is data again.
+
+  The neighbouring parsers were checked and were already right: `trimHostNote`
+  and `Vocabulary.TruncationNotes` read the last line, `ERROR:`/`DENIED:` are
+  matched at the start of a value.
+
 ## 2.2.1
 
 An engine fix; the format itself did not change, so nothing needs migrating and
