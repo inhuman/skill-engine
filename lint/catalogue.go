@@ -70,6 +70,8 @@ func Rules() []Rule {
 			Title: "a required field is not one the description beside it allows to be empty"},
 		{ID: "W17", Emits: []Severity{SeverityError},
 			Title: "`switch.var` is given a variable's name, not a {{template}}"},
+		{ID: "W18", Emits: []Severity{SeverityWarn},
+			Title: "no alternative of a `contains` is already covered by a shorter one"},
 
 		{ID: "E1", Emits: []Severity{SeverityError}, Needs: []string{"Facts.ServerNames"},
 			Title: "every server the skill declares is registered"},

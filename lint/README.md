@@ -95,6 +95,7 @@ about them stay off — loudly — until you say what you call things.
 | W15 | error | a declared built-in tool exists in the registry | `Facts.BuiltinTools` |
 | W16 | error | a required field is not one the description beside it allows to be empty | — |
 | W17 | error | `switch.var` is given a variable's name, not a `{{template}}` | — |
+| W18 | warn | no alternative of a `contains` is already covered by a shorter one | — |
 | E1 | error | every server the skill declares is registered | `Facts.ServerNames` |
 | E2 | error | a tool the playbook calls exists on the server it names | `Options.CallProtocol`, `Facts.AllTools` |
 | E3 | warn | a read-only skill does not reach for a server that writes | `Options.ReadOnlyRoles`, `Facts.WriteServers` |

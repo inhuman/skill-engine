@@ -1,0 +1,74 @@
+# Choosing the sources by the words of the request — WITHOUT asking a model.
+#
+# This skill used to have a first step whose whole job was "which of these
+# sources did the request name": an instruction carrying a dictionary of
+# synonyms, a small model, and a structured answer of six booleans. The mapping
+# was deterministic; the model was there only to apply it — and applied it
+# badly. Measured on ten live requests: the model at temperature 0 got 5 of 10,
+# the same dictionary in a condition got 10 of 10, and three rewordings of the
+# instruction did not move the ceiling. The misses were all one kind: falling
+# back to a default and dropping what the request had NAMED.
+#
+# So the dictionary moved out of the prompt and into `contains`. The step is
+# gone; what is left is a condition on the steps that do the work.
+
+skill_engine_version: "2.2.0"
+skill_version: "1.0.0"
+name: sources
+description: Answer a question from the sources the request itself names — the wiki, the tracker, or both.
+trigger_examples:
+  - "look it up in the wiki and in the tickets"
+  - "поищи про релиз в вики и в жире"
+role: reader
+kind: leaf
+
+servers: [wiki, tracker]
+
+workflow:
+  tools: [wiki, tracker]
+
+  steps:
+    # Up to six synonyms per value, and they fit on one line: `|` separates
+    # alternatives and any ONE of them is enough. Writing this as nested `if`s
+    # would be worse than the model call it replaces.
+    #
+    # An honest exit when the request names nothing this skill can read — better
+    # than guessing a source and answering from the wrong one.
+    - name: nothing_named
+      when: "input not contains вики | wiki | confluence | тикет | задач | jira | жир"
+      exit: {reason: "the request names no source this skill can read"}
+
+    # `жир` is a ROOT, not a word: it finds «жиру», «жире», «жира». That is why
+    # the format needs no stemming — the author picks the root, and the engine
+    # does not guess at a language it does not know.
+    #
+    # The flip side is that a root must be long enough to be a root: «ком» would
+    # find «компонентах». The linter warns when one alternative makes another
+    # redundant, which is the same mistake seen from the other end.
+    - name: search_wiki
+      when: "input contains вики | wiki | confluence"
+      call:
+        tool: "wiki:page_search"
+        args: {query: "{{input}}"}
+        save_as: from_wiki
+
+    - name: search_tickets
+      when: "input contains тикет | задач | jira | жир"
+      call:
+        tool: "tracker:issue_search"
+        args: {query: "{{input}}"}
+        save_as: from_tickets
+
+    # A step that was skipped left its variable unset, and the engine
+    # substitutes an empty string — which is exactly what "we did not go there"
+    # should look like to the step that words the answer.
+    - name: answer
+      instruction: |
+        The request: {{input}}
+
+        From the wiki: {{from_wiki}}
+        From the tracker: {{from_tickets}}
+
+        Answer from what was found. Do not mention a source that returned
+        nothing — the request did not ask for it.
+      tools: []

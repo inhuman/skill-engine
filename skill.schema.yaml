@@ -917,9 +917,41 @@ $defs:
             var != value
             var is empty        — empty OR a marked failure (ERROR:/DENIED:)
             var is not empty
+            var contains a | b  — the value NAMES any one of these words
+            var not contains a | b
           `is empty` exists because to a "nothing found, try another way" branch
           emptiness and a failure mean the same thing, even though to the policy
           they do not.
+
+          `contains` (format 2.2.0) exists because a step whose whole job is
+          "which of these words did the request use" already carries the mapping
+          in its own text: the decision is deterministic, and the model is there
+          only to apply it. Measured on ten live requests — the model at
+          temperature 0 got 5 of 10, the same dictionary in a condition got 10
+          of 10, and rewording the instruction three ways did not move the
+          ceiling. The misses were all one kind: falling back to a default and
+          dropping what the request had NAMED.
+
+          How it matches:
+            - case-insensitively, across scripts, not only ASCII;
+            - alternatives are separated by `|`, and any ONE of them is enough.
+              An alternative may contain spaces («what we know» is one entry);
+            - the match must begin where a WORD STARTS. That is the default and
+              not an option: the author of a skill will not think about it,
+              while a false match is nearly impossible to debug because the
+              condition looks right. Live burns: «пуст» found inside
+              «перезапустить», `search` inside `research`.
+            - the END is deliberately free, so an alternative matches a word
+              that STARTS with it. That is what makes a dictionary of ROOTS
+              work — «жир» finds «жиру», «жире», «жира» — and a dictionary of
+              roots is why this format needs no stemming, which would be a guess
+              about a language the engine does not know. The cost: a too-short
+              root collides («ком» finds «компонентах»), and the fix is a longer
+              root, not an option.
+
+          There are deliberately NO regular expressions here: they would make
+          skills unreadable and open the door to catastrophic backtracking,
+          while a dictionary of synonyms is covered by plain containment.
       then:
         type: array
         items: {$ref: "#/$defs/Step"}
