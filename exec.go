@@ -6,6 +6,7 @@ package skillengine
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
@@ -37,12 +38,21 @@ type Deps struct {
 	// OnStepStart is called BEFORE a step. Needed by anyone showing work to a
 	// human: a step that runs for 14 seconds emits no event until it
 	// finishes, and there is nothing to show all that time.
+	//
+	// CONCURRENT — see OnStep.
 	OnStepStart func(name, kind string)
 	// OnStep is called RIGHT AFTER each step, not at the end of the flow.
 	//
 	// Otherwise the caller learns about all the steps at once, when the turn
 	// is already over: the progress post shows a finished list instead of work
 	// as it happens, and the user stares at "brewing…" for nine seconds.
+	//
+	// BOTH CALLBACKS MUST BE SAFE FOR CONCURRENT USE. They fire from the
+	// goroutine that ran the step, and the branches of a `parallel` step run in
+	// several at once — so a callback that appends to a slice or writes to a
+	// map needs its own lock. The engine deliberately does not serialise them:
+	// a lock here would hold up a branch for the duration of somebody else's
+	// telemetry write, and the engine has no business deciding that.
 	OnStep func(StepTrace)
 }
 
@@ -90,11 +100,24 @@ type StepTrace struct {
 
 // Outcome — what happened to the flow beyond the variables.
 type Outcome struct {
-	// Steps — the trace of every executed (and skipped) step.
+	// Steps — the trace of every executed (and skipped) step of the FLOW.
+	//
+	// Steps inside the branches of a `parallel` are NOT here, and this is the
+	// one asymmetry in this struct worth knowing before you read it: Skipped
+	// below DOES include them. A branch runs in a forked state and only its
+	// variables and its skips are merged back at the join.
+	//
+	// Nothing about branch steps is lost, though — they reach Deps.OnStep as
+	// they happen, which is where an embedder recording per-step telemetry
+	// takes them from. This field is the flow's shape, OnStep is the event
+	// stream, and only the first one stops at the fork.
 	Steps []StepTrace
 	// Skipped — steps not executed because of a false `when`. Empty for a flow
 	// without conditions; non-empty means the task matched only PARTIALLY, and
 	// this is the only way to notice that.
+	//
+	// Includes steps skipped inside `parallel` branches — see Steps above for
+	// why the two differ.
 	Skipped []string
 	// AnsweredBy — the kind of step that wrote the turn's ANSWER:
 	// "instruction" (the model wrote the text) or "call" (a tool printed it).
@@ -114,7 +137,7 @@ func newState(f *Flow, deps Deps, vars map[string]string) (*state, error) {
 		onStep: deps.OnStep, onStepStart: deps.OnStepStart,
 		assets: f.Assets, assetsRes: deps.Assets, memory: deps.Memory,
 		vocab:      deps.Vocabulary,
-		assetCache: map[string]string{}, seeded: map[string]bool{}}
+		assetCache: map[string]string{}, assetMu: &sync.Mutex{}, seeded: map[string]bool{}}
 	for k, v := range f.Vars {
 		st.vars[k] = v
 		st.seeded[k] = true
@@ -151,7 +174,13 @@ type state struct {
 	vocab Vocabulary
 	// assetCache — content already fetched in THIS turn: one asset consumed by
 	// three steps is fetched once.
+	//
+	// Shared with the branches of a `parallel` step rather than copied into
+	// them, so an asset three branches need is still fetched once — which is
+	// why it needs a lock, and why the lock is a POINTER: a forked state copies
+	// the struct, and a mutex copied by value is a mutex that guards nothing.
 	assetCache map[string]string
+	assetMu    *sync.Mutex
 	// assetCtx — the turn's context for resolving payloads. expand() is called
 	// from places with no ctx at hand, and threading it through every
 	// signature for the sake of one branch costs more than storing it here:

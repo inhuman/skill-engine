@@ -1,0 +1,16 @@
+# A one-step skill whose only job is to declare things and check they arrive.
+skill_engine_version: "2.2.2"
+skill_version: "1.0.0"
+name: declared
+description: A fixture — a step that names its model and its sampling.
+trigger_examples: ["anything"]
+
+workflow:
+  steps:
+    - name: answer
+      instruction: "Ответь на: {{input}}"
+      tools: []
+      model: some-small-model
+      sampling:
+        temperature: 0
+        max_tokens: 128

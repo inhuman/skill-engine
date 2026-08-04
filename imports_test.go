@@ -3,6 +3,7 @@ package skillengine_test
 import (
 	"go/build"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -75,6 +76,19 @@ func packageDirs(t *testing.T) []string {
 		if name := d.Name(); path != "." && (strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_")) {
 			return fs.SkipDir
 		}
+		// A directory with its own go.mod is a DIFFERENT module and not part of
+		// this one. That is what lets the examples show the engine embedded in
+		// an application built on a framework — eino appears in that module's
+		// go.mod and never in the engine's.
+		//
+		// The guard is not weakened by this: delete such a go.mod and the files
+		// join this module, the walk finds them again, and their imports are
+		// reported like anyone else's.
+		if path != "." {
+			if _, err := os.Stat(filepath.Join(path, "go.mod")); err == nil {
+				return fs.SkipDir
+			}
+		}
 		if files, _ := filepath.Glob(filepath.Join(path, "*.go")); len(files) > 0 {
 			dirs = append(dirs, path)
 		}
@@ -110,4 +124,37 @@ func slicesContains(list []string, v string) bool {
 		}
 	}
 	return false
+}
+
+// The examples must stay SEPARATE modules, and this is the guard for that.
+//
+// It is the only thing standing between "an example shows the engine used with
+// a framework" and "the engine depends on a framework": delete one of these
+// go.mod files and every import inside becomes an import of this module, which
+// TestEngineStaysSelfContained would then report — but only if somebody
+// remembers the example was supposed to be its own module in the first place.
+// This says so out loud.
+func TestExampleAppsAreSeparateModules(t *testing.T) {
+	entries, err := os.ReadDir("examples")
+	if err != nil {
+		t.Fatalf("reading examples: %v", err)
+	}
+	var apps int
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		dir := filepath.Join("examples", e.Name())
+		files, _ := filepath.Glob(filepath.Join(dir, "*.go"))
+		if len(files) == 0 {
+			continue // examples/skills — YAML, part of no module
+		}
+		apps++
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err != nil {
+			t.Errorf("%s holds Go code and no go.mod — its dependencies would become the engine's", dir)
+		}
+	}
+	if apps == 0 {
+		t.Fatal("no example application found — the walk is looking at the wrong place")
+	}
 }

@@ -177,7 +177,7 @@ func TestSkillCoversEverySchemaField(t *testing.T) {
 // how an embedder loads them, and a header that stopped validating would go
 // unnoticed by a test that only looks at the steps.
 func TestExamplesLoadAsSkills(t *testing.T) {
-	files, err := filepath.Glob(filepath.Join("examples", "*.yaml"))
+	files, err := filepath.Glob(filepath.Join("examples", "skills", "*.yaml"))
 	require.NoError(t, err)
 	require.NotEmpty(t, files)
 

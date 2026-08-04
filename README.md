@@ -2,16 +2,68 @@
 
 **English** · [Русский](README.ru.md)
 
+[![Version](https://img.shields.io/github/v/tag/inhuman/skill-engine?sort=semver&style=flat-square&label=version)](https://github.com/inhuman/skill-engine/tags)
+[![Build](https://img.shields.io/github/actions/workflow/status/inhuman/skill-engine/ci.yml?style=flat-square&logo=github)](https://github.com/inhuman/skill-engine/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/inhuman/skill-engine.svg)](https://pkg.go.dev/github.com/inhuman/skill-engine)
+[![Go Report Card](https://goreportcard.com/badge/github.com/inhuman/skill-engine?style=flat-square)](https://goreportcard.com/report/github.com/inhuman/skill-engine)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/inhuman/skill-engine?style=flat-square&logo=go)](https://go.dev/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
+
 An engine for declarative programs for an LLM agent: a skill is described in
 **steps**, and control over the turn belongs to the code, not to the model.
 Steps are not the only form: a skill with only a `playbook` (a free-form
 instruction) is a full skill too (see "A prompt works as well").
+
+```
+go get github.com/inhuman/skill-engine
+```
+
+**Start here → [QUICKSTART.md](QUICKSTART.md).** Fifteen minutes, at the end of
+which you have run the same skill BOTH ways — as a prompt and as steps — on the
+same request, and seen the difference in what it cost and in what it did. Steps
+1–5 need no model at all.
+
+**Then → [`examples/`](examples/):** the format in
+[`examples/skills/`](examples/skills/), and two working applications that embed
+the engine — [`simple-llm-app`](examples/simple-llm-app/) on an
+OpenAI-compatible endpoint with nothing but `net/http`, and
+[`eino-llm-app`](examples/eino-llm-app/) with the model reached through a
+framework. Both run offline in their tests.
 
 **No dependencies** — production code runs on the standard library alone: the
 engine is embedded into someone else's application, and every dependency here
 would become a dependency of the embedder. YAML parsing is passed in as a
 parameter (the `Unmarshal` type), version comparison is implemented in place.
 The boundary is held by a guard test, `imports_test.go`, test imports included.
+
+## Status
+
+**Where it runs.** The engine was taken out of a working assistant, where it
+executes that assistant's whole skill catalogue — around thirty skills, in
+production. It is not a design sketch: every field in the format is there
+because something broke without it, and the comment beside the field says what.
+
+**Library version — `v0.5.x`.** Below `1.0` the **Go API may still move**: a
+type can gain a field, a function a parameter. What is already stable is the
+**format** — skill files are versioned separately and on their own rules.
+
+**Format version — `2.2.2`** (`EngineVersion` in `version.go`). A skill declares
+the minimum it needs in `skill_engine_version`, and a foreign MAJOR is refused
+in both directions: a description of a previous major would parse without a
+single complaint, silently losing fields the structs no longer have. What
+changed in each version, and what a migration does, is in
+[CHANGELOG.md](CHANGELOG.md).
+
+**If you have skills written for format 1.x**, they do not load: that is the
+refusal above, working as intended. `Migrate(raw)` rewrites them — it edits the
+file as text, so comments, key order and block scalars survive — but until you
+run it those skills do not execute at all, including on a schedule. Better said
+here than discovered on a Monday morning.
+
+**Tests.** 89.3% statement coverage in the engine, 95.1% in the linter, plus
+guard tests for the properties that prose cannot hold: no dependencies, no
+direct reads of the variable map, the two schema translations staying
+structurally identical, and the example applications staying separate modules.
 
 ## Why
 
@@ -21,10 +73,96 @@ the model read before it started acting. In steps the same thing is expressed
 structurally: in the unconfirmed branch the `retract` call **is not there**, a
 `call` step cannot be repeated, a branch that does not apply does not run.
 
-Measurements on live skills (tool calls / seconds, before → after): three
-skills of one catalogue went 18/95 → **2/6**, 7/33 → **2/5** and 9/29 →
-**5/11**. What they did is beside the point — what changed is who held the
-control flow.
+### What it changed, measured on live traffic
+
+Not a benchmark of one question run twice — the event log of a working
+installation: every turn where a skill matched, over five weeks, questions asked
+by people rather than by the author of the skill. The metric is **LLM
+generations per turn**, orchestrator and subagents together.
+
+The catalogue moved from prose to steps on one day, and the periods are split by
+that date.
+
+| | |
+|---|---:|
+| skills with at least 5 turns on each side | **23** |
+| turns compared | **5 280** (3 469 prose, 1 811 steps) |
+| significantly cheaper (Mann–Whitney, p<0.05) | **20** |
+| significantly more expensive | **1** |
+| no significant difference | **2** |
+
+The effect is a median of −18 to −0.5 generations per turn. The largest: a
+triage skill went from a median of **38 generations per turn to 20**. Typical:
+**7 → 3**.
+
+**One skill got worse.** A health-checking skill went the other way — median
+**6 → 10** generations, p<0.001. The measurement does not say why: it counts
+generations, not reasons.
+
+So steps are not automatically cheaper, and the format is not a substitute for
+checking. Known ways a skill gets MORE expensive when it moves into steps:
+
+- **an asset inside a step that has tools.** The knowledge rides along into
+  every generation of the react loop, not just the first one. Splitting into
+  "decide" (knowledge, no tools) and "do" (tools, no knowledge) is the fix;
+- **splitting a turn that had nothing to split.** Two steps means two prompts,
+  each carrying its own context. If the second step does not remove work from
+  the first, it only adds a generation;
+- **a decision that is genuinely open.** Wording an answer, judging quality,
+  reading somebody's intent — a condition cannot replace that, and pretending
+  otherwise just moves the model call somewhere less visible;
+- **one or two steps and no branching at all** — prose is cheaper, and the
+  format says so itself (see "A prompt works as well").
+
+Every skill is worth measuring on its own after it is rewritten. This engine
+gives you the trace to measure with (`Outcome.Steps`) and a linter for the
+defects that stay quiet; it does not promise that a rewrite pays.
+
+**Multiple comparisons.** Those 23 tests are 23 chances for a fluke, so: with
+the Holm–Bonferroni correction **16 of the 23 stay significant — 15 cheaper and
+the one that got more expensive**. The skills that drop out are mostly the ones
+with the fewest turns, and the conclusion does not move. Worth noting that the
+loss survives the correction too: it is not an artifact of testing many skills
+at once.
+
+**What this is and is not.** The periods are separated by a DATE, not by
+randomisation, and other things changed in those same days — the engine was
+being edited alongside the skills. So this is an **observational before/after
+comparison, not an experiment**: it shows that the catalogue got cheaper across
+that boundary, not that nothing else contributed. The underlying event log
+belongs to a private installation, so what is published here is the aggregate
+rather than the raw data.
+
+## What this is not
+
+The neighbours are worth naming, because the differences are architectural
+rather than a matter of taste.
+
+**Not a process orchestrator** (Temporal, n8n). The engine owns no state between
+turns, has no storage of its own and does not survive a restart: a turn runs
+inside somebody else's application and ends with it. Comparing durability is
+comparing different jobs — if you need a workflow that resumes after a crash
+three days later, this is the wrong tool and nothing here will make it right.
+
+**Not an agent framework** (LangGraph and its relatives). There the graph is
+written by the application's developer, in the application's language, and it
+ships with the application. Here the steps are written by the SKILL'S author, in
+YAML, and the skill is portable between hosts — which is why the format has a
+version of its own and why `Migrate` exists at all. A skill is data your users
+can write; a graph is code you deploy.
+
+**Zero dependencies is a consequence, not a pose.** An engine embedded into
+someone else's application makes every one of its dependencies theirs, with
+their versions and their conflicts. So YAML arrives as a parameter (the
+`Unmarshal` type), version comparison is thirty lines instead of a library, and
+`imports_test.go` fails the build the moment production code imports anything at
+all. Rare enough to be worth naming where you are comparing.
+
+**When you do NOT need this.** One or two steps and no branching — prose is
+cheaper, and the format says so itself (see "A prompt works as well"). The
+engine starts paying where a turn has branches, a loop, a tool set that must
+narrow, or a guard that has to be impossible to violate rather than merely
+asked for.
 
 ## A prompt works as well
 
@@ -238,9 +376,23 @@ out, outcome, err := skillengine.ExecuteWith(ctx, flow, skillengine.Deps{
   messages in chat instead of an answer.
 - `Outcome.Steps` — the trace of every step (name, kind, outcome, reason,
   duration, number of calls and failures);
-- `Outcome.Skipped` — steps not executed because of `when`;
+- `Outcome.Skipped` — steps not executed because of `when`, **including those
+  inside `parallel` branches**;
+- the one asymmetry worth knowing: `Outcome.Steps` stops at a `parallel` — the
+  steps INSIDE its branches are not there, while `Skipped` above does include
+  them. A branch runs in a forked state, and only its variables and its skips
+  are merged back at the join. Nothing is lost by it: branch steps reach
+  `OnStep` as they happen, which is where per-step telemetry comes from.
+  `Steps` is the flow's shape, `OnStep` is the event stream, and only the first
+  one stops at the fork;
 - `Outcome.AnsweredBy` — `instruction` or `call`: what wrote the answer. Needed
   so that post-processing does not rewrite a script's deterministic output.
+
+`OnStepStart` and `OnStep` **must be safe for concurrent use**: they fire from
+the goroutine that ran the step, and the branches of a `parallel` run in several
+at once. A callback appending to a slice needs its own lock. The engine does not
+serialise them on purpose — a lock there would hold up a branch for the duration
+of somebody else's telemetry write.
 
 The engine logs nothing, persists nothing and goes nowhere: the input and the
 steps' output are the caller's data. Everything visible from outside is handed
@@ -387,6 +539,6 @@ limitation worth knowing before relying on it are in
 ## Tests
 
 `example_flow_test.go` — runnable examples of the format, a good first entry
-point. `examples_test.go` parses every file from `examples/` with the engine: an
+point. `examples_test.go` parses every file from `examples/skills/` with the engine: an
 example that stopped parsing is worse than a missing one — it teaches the wrong
 thing.

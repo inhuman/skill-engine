@@ -147,7 +147,7 @@ properties:
       temperature, reasoning effort.
 
       The schema does not close the list — everyone has their own profiles.
-      Example names, and what may stand behind them, are in examples/.
+      Example names, and what may stand behind them, are in examples/skills/.
 
   kind:
     type: string
@@ -155,7 +155,7 @@ properties:
       The skill's kind — a label for the application: it decides from this how
       to present and execute the skill. The schema does not restrict the value;
       an example of splitting into standalone and composite skills is in
-      examples/.
+      examples/skills/.
 
   temperature:
     type: number
@@ -244,7 +244,7 @@ properties:
       Arbitrary data for the application: a run schedule, an owner, tags,
       anything else. The engine does not look in here and does not check the
       shape — the field exists so that every embedder does not have to reinvent
-      such things. Sample contents are in examples/.
+      such things. Sample contents are in examples/skills/.
 
 # An explicit mode must have a description under it. These two rules catch in
 # the editor and in CI exactly what people otherwise trip over at run time: the
@@ -1018,7 +1018,7 @@ $defs:
         description: |
           WHAT it essentially is. The schema does not restrict the value — every
           application has its own set; examples ("code", "reference text",
-          "configuration", "data") are in examples/.
+          "configuration", "data") are in examples/skills/.
 
           The label is auxiliary: the way it is passed is chosen by the PLACE of
           use, not by this (see the two reference forms above).
@@ -1028,7 +1028,7 @@ $defs:
         description: |
           WHERE the content comes from. The source's name is interpreted by the
           application's resolver — the schema does not close the list (examples
-          are in examples/).
+          are in examples/skills/).
 
           The format cares about one thing: the content is either HERE
           (`content`) or AT AN ADDRESS (`ref`). Exactly one of the two —
@@ -1043,7 +1043,7 @@ $defs:
         description: |
           The address of the content — when it does not live in the skill
           itself. The form of the address is defined by the application's
-          resolver (examples are in examples/).
+          resolver (examples are in examples/skills/).
 
       args:
         type: object
@@ -1066,7 +1066,7 @@ $defs:
 
           The engine does not look in here and does not check the shape — it
           hands this to the application's resolver as is. Contents by kind are
-          in examples/vocabulary.yaml.
+          in examples/skills/vocabulary.yaml.
 
           Which means VALIDATING THE KEYS IS THE RESOLVER'S JOB, and it is not
           optional. The openness is paid for: `params: {langauge: python}`
@@ -1081,7 +1081,7 @@ $defs:
           The route of the OUTPUT of the tool that consumed the asset: where to
           put the result instead of returning it into the step's variable. Route
           names are defined by the application — the schema does not restrict
-          them (examples are in examples/).
+          them (examples are in examples/skills/).
 
           Why declare it here rather than decide as you go: a route the model is
           supposed to choose gets forgotten exactly when everything else has

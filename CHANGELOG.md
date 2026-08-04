@@ -21,6 +21,47 @@ wrap skills in something of your own — front matter, a markdown body, several
 documents in one file — unwrap before calling and wrap the result back;
 anything else is refused rather than guessed at.
 
+## 2.2.3
+
+An engine fix; the format itself did not change.
+
+- **Fixed**: a branch of a `parallel` step did not inherit the assets, their
+  resolver, cache and context, working memory, or the application's vocabulary.
+  The sub-state was assembled by listing fields, and those six were not on the
+  list.
+
+  Nothing failed loudly. An unknown asset expands to an empty string by
+  contract, so `{{asset:x}}` inside a branch quietly became "" and the tool call
+  that needed it lost a required argument — with the error pointing at the
+  argument rather than at the substitution. Working memory and the vocabulary
+  went the same way: a step in a branch read a preview instead of the whole
+  value, and `one_of` lost its tie-breaker.
+
+  It stayed hidden because in a live catalogue of 29 skills no `call` step with
+  an asset had ever sat inside a `parallel` branch.
+
+  The branch state is now FORKED from the flow's and the few branch-local
+  fields are reset explicitly, so a field added to the engine reaches branches
+  by default. The list had the opposite default, and whoever adds a field is
+  not thinking about `parallel`.
+
+  The asset cache is shared with the branches rather than copied into them, so
+  an asset three branches need is still fetched once — under a lock held across
+  the resolve. CI now runs the race detector.
+
+- **Documented, not changed**: `Deps.OnStep` and `Deps.OnStepStart` fire from
+  the goroutine that ran the step, so inside a `parallel` they fire from several
+  at once and a callback that appends to a slice needs its own lock. The engine
+  does not serialise them on purpose — a lock there would hold up a branch for
+  the duration of somebody else's telemetry write. Found by the race detector
+  added above, in a test written the way an embedder would write it.
+
+- **Documented, not changed**: `Outcome.Steps` stops at a `parallel` — the steps
+  inside its branches are not in it, while `Outcome.Skipped` does include them.
+  Branch steps reach `OnStep` as they happen, so nothing is lost; but the two
+  fields disagree, and a reader who checks one and assumes the other loses an
+  afternoon. Now stated on the type and pinned by a test.
+
 ## 2.2.2
 
 An engine fix; the format itself did not change.

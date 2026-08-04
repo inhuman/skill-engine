@@ -559,16 +559,31 @@ func (s *state) parallelStep(ctx context.Context, step Step) (bool, error) {
 		wg.Add(1)
 		go func(i int, branch []Step) {
 			defer wg.Done()
-			sub := &state{
-				vars:        maps.Clone(s.vars),
-				seeded:      maps.Clone(s.seeded),
-				tools:       s.tools,
-				runner:      s.runner,
-				caller:      s.caller,
-				delegate:    s.delegate,
-				onStep:      s.onStep,
-				onStepStart: s.onStepStart,
-			}
+			// FORKED from the flow's state, not assembled from a list of
+			// fields. The list was the bug: six of them were missing — the
+			// assets, their resolver, cache and context, working memory, and
+			// the application's vocabulary — so an `{{asset:x}}` inside a
+			// branch expanded to an empty string by contract, and the call
+			// that needed it lost a required argument. Nothing failed; the
+			// error pointed at the argument.
+			//
+			// A list has to be extended by whoever adds a field to `state`,
+			// and the person adding a field is not thinking about `parallel`.
+			// Forking inverts the default: everything reaches a branch unless
+			// it is explicitly reset below, and what is reset is visible in
+			// one place.
+			forked := *s
+			sub := &forked
+			// What a branch must NOT inherit: the variables are its own copy
+			// (the branches do not see each other's work — otherwise the
+			// result would depend on who finished first), and the trace, the
+			// skips and the answer belong to the branch alone until they are
+			// merged back after the join.
+			sub.vars = maps.Clone(s.vars)
+			sub.seeded = maps.Clone(s.seeded)
+			sub.skipped = nil
+			sub.traces = nil
+			sub.answeredBy = ""
 			for k := range sub.vars {
 				sub.seeded[k] = true // everything from before the fork is the branch's input
 			}

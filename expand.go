@@ -146,6 +146,13 @@ func (s *state) payload(name string) string {
 // instruction. The failure is not silent, though — the resolver reports it to
 // the caller.
 func (s *state) asset(name string) string {
+	// The lock is held across the resolve, not just around the map: branches of
+	// a `parallel` step share this cache, and releasing it to fetch would let
+	// three branches fetch the same asset three times — the thing the cache
+	// exists to prevent. Resolving is not the hot path; a race here would be.
+	s.assetMu.Lock()
+	defer s.assetMu.Unlock()
+
 	if v, ok := s.assetCache[name]; ok {
 		return v
 	}
