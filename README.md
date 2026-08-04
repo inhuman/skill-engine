@@ -118,6 +118,13 @@ Every skill is worth measuring on its own after it is rewritten. This engine
 gives you the trace to measure with (`Outcome.Steps`) and a linter for the
 defects that stay quiet; it does not promise that a rewrite pays.
 
+**Multiple comparisons.** Those 23 tests are 23 chances for a fluke, so: with
+the Holm–Bonferroni correction **16 of the 23 stay significant — 15 cheaper and
+the one that got more expensive**. The skills that drop out are mostly the ones
+with the fewest turns, and the conclusion does not move. Worth noting that the
+loss survives the correction too: it is not an artifact of testing many skills
+at once.
+
 **What this is and is not.** The periods are separated by a DATE, not by
 randomisation, and other things changed in those same days — the engine was
 being edited alongside the skills. So this is an **observational before/after
