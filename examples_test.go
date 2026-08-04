@@ -18,7 +18,7 @@ import (
 // fields would draw the wrong conclusion from it.
 func exampleFiles(t *testing.T) []string {
 	t.Helper()
-	all, err := filepath.Glob(filepath.Join("examples", "*.yaml"))
+	all, err := filepath.Glob(filepath.Join("examples", "skills", "*.yaml"))
 	require.NoError(t, err)
 	require.NotEmpty(t, all, "the examples are gone")
 
@@ -69,7 +69,7 @@ func readWorkflow(t *testing.T, path string) (se.Flow, bool) {
 // example that stopped parsing is worse than a missing one — it teaches the
 // wrong thing.
 func TestExamplesParseAndValidate(t *testing.T) {
-	files, err := filepath.Glob(filepath.Join("examples", "*.yaml"))
+	files, err := filepath.Glob(filepath.Join("examples", "skills", "*.yaml"))
 	require.NoError(t, err)
 	require.NotEmpty(t, files, "the examples are gone")
 
@@ -89,7 +89,7 @@ func TestExamplesParseAndValidate(t *testing.T) {
 // a skill of another major is refused, so an example carrying a stale version
 // teaches a file that will not run.
 func TestExamplesDeclareCurrentFormat(t *testing.T) {
-	files, err := filepath.Glob(filepath.Join("examples", "*.yaml"))
+	files, err := filepath.Glob(filepath.Join("examples", "skills", "*.yaml"))
 	require.NoError(t, err)
 
 	for _, path := range files {
@@ -112,7 +112,7 @@ func TestExamplesDeclareCurrentFormat(t *testing.T) {
 // An example must WORK, not merely parse: steps reach the executors, the server
 // is computed, the answer arrives.
 func TestExamplePodsRuns(t *testing.T) {
-	f, ok := readWorkflow(t, filepath.Join("examples", "pods.yaml"))
+	f, ok := readWorkflow(t, filepath.Join("examples", "skills", "pods.yaml"))
 	require.True(t, ok)
 
 	answers := map[string]string{

@@ -373,5 +373,5 @@ rep, err := lint.Lint(raw, facts, lint.Options{Unmarshal: yaml.Unmarshal})
 ## Тесты
 
 `example_flow_test.go` — исполняемые примеры формата, годятся как первая точка
-входа. `examples_test.go` разбирает движком все файлы из `examples/`: пример,
+входа. `examples_test.go` разбирает движком все файлы из `examples/skills/`: пример,
 переставший разбираться, хуже отсутствующего — он учит неверному.

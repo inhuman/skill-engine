@@ -23,3 +23,17 @@ jobs:
         run: go test ./... -count=1
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.3.0 ./...
+
+      # The example applications are SEPARATE modules — that is what keeps their
+      # dependencies (eino, an SDK, whatever the next one uses) out of the
+      # engine's go.mod, and it also means `go test ./...` above never sees
+      # them. Without this step an example rots quietly, and an example that
+      # does not build teaches the format wrong.
+      - name: Examples
+        run: |
+          for mod in examples/*/go.mod; do
+            dir=$(dirname "$mod")
+            echo "── $dir"
+            go vet -C "$dir" ./...
+            go test -C "$dir" ./... -count=1
+          done

@@ -19,6 +19,9 @@ PLAN.md
 *.out
 *.test
 coverage.*
+# Собранные примеры: `go build` в их каталоге кладёт бинарник рядом с исходником
+examples/*/simple-llm-app
+examples/*/eino-llm-app
 
 # Окружение
 .env

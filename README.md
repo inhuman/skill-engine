@@ -387,6 +387,6 @@ limitation worth knowing before relying on it are in
 ## Tests
 
 `example_flow_test.go` — runnable examples of the format, a good first entry
-point. `examples_test.go` parses every file from `examples/` with the engine: an
+point. `examples_test.go` parses every file from `examples/skills/` with the engine: an
 example that stopped parsing is worse than a missing one — it teaches the wrong
 thing.

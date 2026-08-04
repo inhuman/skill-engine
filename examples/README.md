@@ -1,27 +1,49 @@
 # Examples
 
-The format's schema (`skill.schema.yaml`) deliberately **does not close the
-lists of values** for `role`, `kind`, `source`, `deliver`, `reasoning` or the
-shape of `ref`: behind those words stands the design of a particular
-application, and someone else's is of no use to yours.
+Two things live here: skills, and applications that run them.
 
-Here are samples of what those slots get filled with, plus working skills from
-different areas. These are EXAMPLES, not requirements: invent your own values.
+| | |
+|---|---|
+| [`skills/`](skills/) | the format itself — working skills from different areas, plus a vocabulary of the values the schema deliberately leaves open |
+| [`simple-llm-app/`](simple-llm-app/) | the engine embedded in ~200 lines: an OpenAI-compatible endpoint over `net/http`, no dependencies beyond the engine and a YAML parser |
+| [`eino-llm-app/`](eino-llm-app/) | the same application with the model reached through [eino](https://github.com/cloudwego/eino) — the whole framework-shaped part is one forty-line adapter |
 
-Every file is checked by a test (`examples_test.go`): an example that stopped
-parsing is worse than a missing one — it teaches the wrong thing.
+## Why each application is its own module
 
-| file | about | what it shows |
-|---|---|---|
-| [`vocabulary.yaml`](vocabulary.yaml) | a vocabulary of values | what the schema's open slots get filled with |
-| [`pods.yaml`](pods.yaml) | listing machines in a cluster | parse the request → call → answer; the server is computed, but only within the declared set |
-| [`weather.yaml`](weather.yaml) | weather through a browser | a `call` step without generation; the browser goes only to the step that needs it |
-| [`proofread.yaml`](proofread.yaml) | proofreading text | a reference asset is SUBSTITUTED into the instruction — otherwise the model never reads it |
-| [`expenses.yaml`](expenses.yaml) | spending as a chart | a code asset and the data go BY REFERENCE past the context; `deliver` is declared in advance |
-| [`inbox.yaml`](inbox.yaml) | triaging an email | `switch` + `delegate`: in the "spam" branch the step that replies to the customer simply is not there |
-| [`research.yaml`](research.yaml) | an answer from several sources | `parallel` and `<collect>.skipped` — "we never went" differs from "it was empty" |
-| [`glossary.yaml`](glossary.yaml) | translating terms | `for_each` and `collect`; `in` takes a variable NAME, not a template |
-| [`contract.yaml`](contract.yaml) | checking a contract | `if` + `exit` (wrong document — an honest exit) and an external asset with a `fetch` policy |
-| [`triage.yaml`](triage.yaml) | triaging an incident | a composite skill: branching and delegation |
-| [`audit.yaml`](audit.yaml) | checking a document | `profiles` shared by the classifier steps, and all four `on_empty` outcomes |
-| [`menu.yaml`](menu.yaml) | suggesting dishes by section | `contains` — a classifier step replaced by a condition, dictionary and all |
+Both apps have their own `go.mod`, and that is the point rather than tidiness.
+
+The engine's promise is that embedding it adds no dependencies: production code
+is stdlib only, and a guard test fails the build the moment that stops being
+true. An example that pulls in a framework would break exactly that promise —
+unless it is a separate module, which is what `go.mod` next to it makes it. The
+engine's `go.mod` never learns that eino exists.
+
+Two guards hold this in place, both in `imports_test.go` upstairs: one skips
+nested modules while checking that the engine imports nothing, the other checks
+that a directory with Go code in it still HAS a `go.mod`. Delete one of those
+files and the first guard immediately reports eino as a dependency of the
+engine — which is what it is at that moment.
+
+CI runs `go vet` and `go test` inside each example module separately, because
+`go test ./...` at the top never descends into them. An example that does not
+build teaches the format wrong.
+
+## Running one
+
+```
+cd simple-llm-app
+export OPENAI_BASE_URL=http://localhost:8000/v1   # vLLM, Ollama, LM Studio, …
+export OPENAI_API_KEY=…
+export OPENAI_MODEL=…
+
+go run . -skill ../skills/menu.yaml -input "подбери десерт и напиток"
+```
+
+Both applications print the answer and then the trace — which step ran, which
+was skipped and why, how many tool calls each made. That trace is the engine's
+whole observability contract: it logs nothing, stores nothing and reaches
+nowhere on its own.
+
+Neither needs a key to be **tested**: each has a test that runs the whole
+application against a stub model, so "it works" is something you can check
+rather than something this file claims.

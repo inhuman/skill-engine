@@ -125,7 +125,7 @@ func TestCatalogueIdsAreUnique(t *testing.T) {
 // clean — an example that trips a rule teaches the defect along with the format,
 // and this is also the false-positive guard for every rule at once.
 func TestShippedExamplesAreClean(t *testing.T) {
-	files, err := filepath.Glob(filepath.Join("..", "examples", "*.yaml"))
+	files, err := filepath.Glob(filepath.Join("..", "examples", "skills", "*.yaml"))
 	require.NoError(t, err)
 	require.NotEmpty(t, files, "the examples are gone")
 
