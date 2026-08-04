@@ -49,6 +49,19 @@ An engine fix; the format itself did not change.
   an asset three branches need is still fetched once — under a lock held across
   the resolve. CI now runs the race detector.
 
+- **Documented, not changed**: `Deps.OnStep` and `Deps.OnStepStart` fire from
+  the goroutine that ran the step, so inside a `parallel` they fire from several
+  at once and a callback that appends to a slice needs its own lock. The engine
+  does not serialise them on purpose — a lock there would hold up a branch for
+  the duration of somebody else's telemetry write. Found by the race detector
+  added above, in a test written the way an embedder would write it.
+
+- **Documented, not changed**: `Outcome.Steps` stops at a `parallel` — the steps
+  inside its branches are not in it, while `Outcome.Skipped` does include them.
+  Branch steps reach `OnStep` as they happen, so nothing is lost; but the two
+  fields disagree, and a reader who checks one and assumes the other loses an
+  afternoon. Now stated on the type and pinned by a test.
+
 ## 2.2.2
 
 An engine fix; the format itself did not change.

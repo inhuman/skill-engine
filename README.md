@@ -376,9 +376,23 @@ out, outcome, err := skillengine.ExecuteWith(ctx, flow, skillengine.Deps{
   messages in chat instead of an answer.
 - `Outcome.Steps` — the trace of every step (name, kind, outcome, reason,
   duration, number of calls and failures);
-- `Outcome.Skipped` — steps not executed because of `when`;
+- `Outcome.Skipped` — steps not executed because of `when`, **including those
+  inside `parallel` branches**;
+- the one asymmetry worth knowing: `Outcome.Steps` stops at a `parallel` — the
+  steps INSIDE its branches are not there, while `Skipped` above does include
+  them. A branch runs in a forked state, and only its variables and its skips
+  are merged back at the join. Nothing is lost by it: branch steps reach
+  `OnStep` as they happen, which is where per-step telemetry comes from.
+  `Steps` is the flow's shape, `OnStep` is the event stream, and only the first
+  one stops at the fork;
 - `Outcome.AnsweredBy` — `instruction` or `call`: what wrote the answer. Needed
   so that post-processing does not rewrite a script's deterministic output.
+
+`OnStepStart` and `OnStep` **must be safe for concurrent use**: they fire from
+the goroutine that ran the step, and the branches of a `parallel` run in several
+at once. A callback appending to a slice needs its own lock. The engine does not
+serialise them on purpose — a lock there would hold up a branch for the duration
+of somebody else's telemetry write.
 
 The engine logs nothing, persists nothing and goes nowhere: the input and the
 steps' output are the caller's data. Everything visible from outside is handed

@@ -161,3 +161,52 @@ type assetFunc func(ctx context.Context, name string, a Asset) (string, error)
 func (f assetFunc) Resolve(ctx context.Context, name string, a Asset) (string, error) {
 	return f(ctx, name, a)
 }
+
+// The one asymmetry in Outcome, pinned so it stays a documented property rather
+// than an accident: Skipped includes what a `parallel` branch skipped, Steps
+// does not include what a branch ran.
+//
+// Nothing is lost by it — branch steps reach Deps.OnStep as they happen, which
+// is where per-step telemetry comes from. But the two fields disagree, and a
+// reader who checks one and assumes the other is the next person to lose an
+// afternoon. If this test starts failing because branch traces were merged in,
+// that is a behaviour change for every embedder reading Outcome.Steps: say so
+// in the CHANGELOG and update the doc comment on Outcome.
+func TestOutcomeReportsBranchesOnlyThroughSkippedAndOnStep(t *testing.T) {
+	f := parseFlow(t, `
+steps:
+  - name: fork
+    parallel:
+      branches:
+        - - name: ran_in_branch
+            set: {var: a, value: "1"}
+        - - name: skipped_in_branch
+            when: "missing == yes"
+            set: {var: b, value: "2"}
+`)
+	// The lock is not test hygiene — it is the contract. OnStep fires from the
+	// goroutine that ran the step, so inside a `parallel` it fires from several
+	// at once, and a callback appending to a slice without one is a data race
+	// in the embedder. Written here the way an embedder has to write it.
+	var mu sync.Mutex
+	var live []string
+	_, outcome, err := ExecuteWith(context.Background(), f, Deps{
+		OnStep: func(tr StepTrace) {
+			mu.Lock()
+			defer mu.Unlock()
+			live = append(live, tr.Name)
+		},
+	}, nil)
+	require.NoError(t, err)
+
+	var inOutcome []string
+	for _, s := range outcome.Steps {
+		inOutcome = append(inOutcome, s.Name)
+	}
+	assert.Equal(t, []string{"fork"}, inOutcome,
+		"Outcome.Steps gained the branch steps — a change for everyone reading it")
+	assert.Contains(t, outcome.Skipped, "skipped_in_branch",
+		"Outcome.Skipped must include what a branch skipped")
+	assert.Subset(t, live, []string{"ran_in_branch", "skipped_in_branch", "fork"},
+		"OnStep is where branch steps are visible, and they were not")
+}
