@@ -95,13 +95,28 @@ The effect is a median of −18 to −0.5 generations per turn. The largest: a
 triage skill went from a median of **38 generations per turn to 20**. Typical:
 **7 → 3**.
 
-**And the one that got worse.** A health-checking skill went the other way —
-median **6 → 10** generations, p<0.001. It is in the table on purpose: twenty
-wins and no losses read as advertising, and one measured loss is what makes the
-other twenty worth reading. Which mechanism did it the measurement does not
-say — it counts generations, not reasons — and the invariants below list the
-ways a step gets MORE expensive, starting with knowledge inside a step that has
-tools.
+**One skill got worse.** A health-checking skill went the other way — median
+**6 → 10** generations, p<0.001. The measurement does not say why: it counts
+generations, not reasons.
+
+So steps are not automatically cheaper, and the format is not a substitute for
+checking. Known ways a skill gets MORE expensive when it moves into steps:
+
+- **an asset inside a step that has tools.** The knowledge rides along into
+  every generation of the react loop, not just the first one. Splitting into
+  "decide" (knowledge, no tools) and "do" (tools, no knowledge) is the fix;
+- **splitting a turn that had nothing to split.** Two steps means two prompts,
+  each carrying its own context. If the second step does not remove work from
+  the first, it only adds a generation;
+- **a decision that is genuinely open.** Wording an answer, judging quality,
+  reading somebody's intent — a condition cannot replace that, and pretending
+  otherwise just moves the model call somewhere less visible;
+- **one or two steps and no branching at all** — prose is cheaper, and the
+  format says so itself (see "A prompt works as well").
+
+Every skill is worth measuring on its own after it is rewritten. This engine
+gives you the trace to measure with (`Outcome.Steps`) and a linter for the
+defects that stay quiet; it does not promise that a rewrite pays.
 
 **What this is and is not.** The periods are separated by a DATE, not by
 randomisation, and other things changed in those same days — the engine was

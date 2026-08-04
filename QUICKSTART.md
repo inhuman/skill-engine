@@ -334,10 +334,10 @@ Two working applications to copy from:
   significantly more expensive, 2 unchanged. That comparison is
   **observational**: the periods are split by a date rather than randomised, and
   other things changed in those same days.
-- One counterexample, on purpose: a health-checking skill went the other way,
-  a median of **6 → 10 generations per turn**. Steps are not free; they are
-  cheaper where the turn has branches, loops and guards, and this is what the
-  other case looks like.
+- In that same measurement one skill got **more** expensive: a median of
+  **6 → 10 generations per turn**. Steps are not automatically cheaper — the
+  README lists the known ways a rewrite costs more, and every skill is worth
+  measuring on its own afterwards.
 
 ---
 
