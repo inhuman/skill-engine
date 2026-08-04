@@ -32,15 +32,19 @@ import (
 func main() {
 	skillPath := flag.String("skill", "../skills/menu.yaml", "path to a skill file")
 	input := flag.String("input", "подбери десерт и напиток", "the user's request")
+	// Overrides the skill's own `mode`. A skill carrying BOTH descriptions can
+	// then be run either way on the same request — which is the A/B in
+	// QUICKSTART.md, and the reason `mode` exists in the format at all.
+	mode := flag.String("mode", "", "run the skill as `workflow` or `playbook` (default: what the skill says)")
 	flag.Parse()
 
-	if err := run(*skillPath, *input, os.Stdout); err != nil {
+	if err := run(*skillPath, *input, *mode, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
 
-func run(skillPath, input string, out io.Writer) error {
+func run(skillPath, input, forceMode string, out io.Writer) error {
 	raw, err := os.ReadFile(skillPath)
 	if err != nil {
 		return err
@@ -61,20 +65,36 @@ func run(skillPath, input string, out io.Writer) error {
 	// Which of the two descriptions to run. A skill may carry a `playbook` as
 	// well, and then the ENGINE takes no part: the application runs the prompt
 	// itself. Handling that case is what makes an embedder complete.
-	mode, err := skill.ResolveMode()
+	//
+	// An explicit mode with an empty half is an ERROR rather than a fallback to
+	// the other one, and the engine enforces that: a silent fallback would give
+	// a clean run over the description that was NOT selected, and a conclusion
+	// drawn from a turn the chosen half never took part in.
+	declared := skill.Mode
+	if forceMode != "" {
+		declared = forceMode
+	}
+	mode, err := se.ResolveMode(declared, skill.HasWorkflow(), skill.HasPlaybook())
 	if err != nil {
 		return err
 	}
+
+	st := &stats{}
 	if mode == se.ModePlaybook {
-		answer, err := newModel().complete(context.Background(), skill.Playbook+"\n\n"+input, nil)
+		// The whole task in one prompt: the model decides what to look up, calls
+		// what it decides, and words the answer. The engine takes no part.
+		answer, u, err := newModel().complete(context.Background(), skill.Playbook+"\n\nЗапрос: "+input, nil)
 		if err != nil {
 			return err
 		}
+		st.add(u)
+		fmt.Fprintln(out, "\n=== answer ===")
 		fmt.Fprintln(out, answer)
+		st.report(out, "playbook")
 		return nil
 	}
 
-	vars, outcome, err := se.ExecuteWith(context.Background(), skill.Workflow, deps(out), map[string]string{
+	vars, outcome, err := se.ExecuteWith(context.Background(), skill.Workflow, deps(out, st), map[string]string{
 		"input": input,
 	})
 	if err != nil {
@@ -100,7 +120,30 @@ func run(skillPath, input string, out io.Writer) error {
 	if len(outcome.Skipped) > 0 {
 		fmt.Fprintln(out, "  skipped:", strings.Join(outcome.Skipped, ", "))
 	}
+	st.report(out, "workflow")
 	return nil
+}
+
+// stats — what the turn cost. Counted because "steps are cheaper" is a claim
+// until somebody puts a number next to it, and the same skill run both ways on
+// the same request is the cheapest way to get one.
+type stats struct {
+	generations int
+	prompt      int
+	completion  int
+}
+
+func (s *stats) add(u usage) {
+	s.generations++
+	s.prompt += u.PromptTokens
+	s.completion += u.CompletionTokens
+}
+
+func (s *stats) report(out io.Writer, mode string) {
+	fmt.Fprintf(out, "\n=== cost (%s) ===\n", mode)
+	fmt.Fprintf(out, "  generations: %d\n", s.generations)
+	fmt.Fprintf(out, "  tokens:      %d prompt + %d completion = %d\n",
+		s.prompt, s.completion, s.prompt+s.completion)
 }
 
 // deps is the whole contract between an application and the engine.
@@ -109,10 +152,10 @@ func run(skillPath, input string, out io.Writer) error {
 // where an asset's content lives, what your host calls things — arrives here.
 // Nothing else is injected, and the engine logs nothing, stores nothing and
 // reaches nowhere on its own.
-func deps(out io.Writer) se.Deps {
+func deps(out io.Writer, st *stats) se.Deps {
 	m := newModel()
 	return se.Deps{
-		Runner:   runner{model: m, log: out},
+		Runner:   runner{model: m, log: out, stats: st},
 		Caller:   tools{log: out},
 		Assets:   assets{},
 		Delegate: nil, // no composite skills here: a `delegate` step would fail loudly
@@ -141,6 +184,7 @@ func deps(out io.Writer) se.Deps {
 type runner struct {
 	model *openAI
 	log   io.Writer
+	stats *stats
 }
 
 func (r runner) Run(ctx context.Context, req se.StepRequest) (se.Result, error) {
@@ -152,10 +196,11 @@ func (r runner) Run(ctx context.Context, req se.StepRequest) (se.Result, error) 
 		fmt.Fprintf(r.log, "  (step %q may use: %s)\n", req.Name, strings.Join(req.Tools, ", "))
 	}
 
-	text, err := r.model.complete(ctx, req.Instruction, &req)
+	text, u, err := r.model.complete(ctx, req.Instruction, &req)
 	if err != nil {
 		return se.Result{}, err
 	}
+	r.stats.add(u)
 
 	// Result carries more than the text: what the executor KNOWS and the engine
 	// cannot derive. A truncated generation and a step that simply had nothing

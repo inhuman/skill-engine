@@ -48,7 +48,7 @@ func env(name, fallback string) string {
 // a `model:` the skill named, its `sampling:`, its `response_schema:`. An
 // executor that ignores them turns every one of those fields into decoration —
 // the skill declares, the engine forwards, and nothing happens.
-func (o *openAI) complete(ctx context.Context, instruction string, req *se.StepRequest) (string, error) {
+func (o *openAI) complete(ctx context.Context, instruction string, req *se.StepRequest) (string, usage, error) {
 	body := map[string]any{
 		"model":    o.model,
 		"messages": []map[string]string{{"role": "user", "content": instruction}},
@@ -86,11 +86,11 @@ func (o *openAI) complete(ctx context.Context, instruction string, req *se.StepR
 
 	raw, err := json.Marshal(body)
 	if err != nil {
-		return "", err
+		return "", usage{}, err
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL+"/chat/completions", bytes.NewReader(raw))
 	if err != nil {
-		return "", err
+		return "", usage{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if o.apiKey != "" {
@@ -99,7 +99,7 @@ func (o *openAI) complete(ctx context.Context, instruction string, req *se.StepR
 
 	resp, err := o.client.Do(httpReq)
 	if err != nil {
-		return "", err
+		return "", usage{}, err
 	}
 	defer resp.Body.Close()
 
@@ -109,15 +109,25 @@ func (o *openAI) complete(ctx context.Context, instruction string, req *se.StepR
 			FinishReason string                   `json:"finish_reason"`
 		} `json:"choices"`
 		Error *struct{ Message string } `json:"error"`
+		// What the run COST. Without it "steps are cheaper" is a claim; with it
+		// the two halves of a skill can be compared on the same request, which
+		// is what QUICKSTART.md has the reader do.
+		Usage usage `json:"usage"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", fmt.Errorf("decoding the answer: %w", err)
+		return "", usage{}, fmt.Errorf("decoding the answer: %w", err)
 	}
 	if out.Error != nil {
-		return "", fmt.Errorf("model: %s", out.Error.Message)
+		return "", usage{}, fmt.Errorf("model: %s", out.Error.Message)
 	}
 	if len(out.Choices) == 0 {
-		return "", fmt.Errorf("model returned no choices")
+		return "", usage{}, fmt.Errorf("model returned no choices")
 	}
-	return out.Choices[0].Message.Content, nil
+	return out.Choices[0].Message.Content, out.Usage, nil
+}
+
+// usage — what one generation cost, as the endpoint reports it.
+type usage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
 }

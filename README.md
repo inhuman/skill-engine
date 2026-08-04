@@ -18,9 +18,14 @@ instruction) is a full skill too (see "A prompt works as well").
 go get github.com/inhuman/skill-engine
 ```
 
-**Start here:** [`examples/`](examples/) — the format in
+**Start here → [QUICKSTART.md](QUICKSTART.md).** Fifteen minutes, at the end of
+which you have run the same skill BOTH ways — as a prompt and as steps — on the
+same request, and seen the difference in what it cost and in what it did. Steps
+1–5 need no model at all.
+
+**Then → [`examples/`](examples/):** the format in
 [`examples/skills/`](examples/skills/), and two working applications that embed
-the engine: [`simple-llm-app`](examples/simple-llm-app/) on an
+the engine — [`simple-llm-app`](examples/simple-llm-app/) on an
 OpenAI-compatible endpoint with nothing but `net/http`, and
 [`eino-llm-app`](examples/eino-llm-app/) with the model reached through a
 framework. Both run offline in their tests.

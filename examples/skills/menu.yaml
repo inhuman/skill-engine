@@ -14,7 +14,7 @@
 # warehouse shares this mechanism and not one of these words.
 
 skill_engine_version: "2.2.0"
-skill_version: "1.0.0"
+skill_version: "1.1.0"
 name: menu
 description: Suggest dishes from the sections of the menu the request names — a dessert, a drink, a main course.
 trigger_examples:
@@ -24,6 +24,31 @@ role: reader
 kind: leaf
 
 servers: [recipes]
+
+# This skill carries BOTH descriptions, which is what `mode` is for: while a
+# prompt is being moved into steps it is worth keeping the old half and
+# switching between them on live requests. Deleting it to compare would mean
+# deleting the work with nowhere to get it back from.
+#
+# `mode: workflow` is what actually runs. Point it at `playbook` — or override
+# it from the outside, as ../simple-llm-app does with -mode — and the same
+# request goes through the prose version instead. That is the A/B in
+# QUICKSTART.md: same file, same model, one word changed.
+mode: workflow
+
+playbook: |
+  Ты подбираешь блюда по разделам меню.
+
+  Разделы и слова, которыми их называют:
+    десерт, сладкое, dessert        → dessert
+    напиток, чай, кофе, коктейль    → drink
+    горячее, второе, main course    → main
+
+  Посмотри, какие разделы названы в запросе, и возьми РОВНО названные.
+  По каждому названному разделу вызови recipes:search с этим разделом.
+  Если не назван ни один — так и скажи, ничего не выдумывай.
+
+  Ответь по тому, что нашлось. Про раздел, который не спрашивали, не пиши.
 
 workflow:
   tools: [recipes]

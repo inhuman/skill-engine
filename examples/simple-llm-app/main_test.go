@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -35,12 +36,23 @@ func stubModel(t *testing.T, answer string) *httptest.Server {
 		if len(body.Messages) == 0 {
 			t.Error("the instruction never reached the model")
 		}
+		// Charged by length, the way a real endpoint charges. That is what makes
+		// the A/B in QUICKSTART.md checkable without a model: the prose half
+		// carries its whole dictionary into the prompt, the steps half does not.
+		prompt := 0
+		for _, m := range body.Messages {
+			prompt += len(m.Content) / 4
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
 			"choices": []any{map[string]any{
 				"message":       map[string]string{"content": answer},
 				"finish_reason": "stop",
 			}},
+			"usage": map[string]int{
+				"prompt_tokens":     prompt,
+				"completion_tokens": len(answer) / 4,
+			},
 		})
 	}))
 	t.Cleanup(srv.Close)
@@ -62,7 +74,7 @@ func TestExampleRunsAShippedSkill(t *testing.T) {
 	withStub(t, "Тирамису и чай — 30 минут.")
 
 	var out bytes.Buffer
-	if err := run("../skills/menu.yaml", "подбери десерт и напиток", &out); err != nil {
+	if err := run("../skills/menu.yaml", "подбери десерт и напиток", "", &out); err != nil {
 		t.Fatalf("the example does not run: %v", err)
 	}
 	got := out.String()
@@ -95,7 +107,7 @@ func TestExampleHandlesAnExit(t *testing.T) {
 	withStub(t, "unused")
 
 	var out bytes.Buffer
-	if err := run("../skills/menu.yaml", "расскажи что-нибудь", &out); err != nil {
+	if err := run("../skills/menu.yaml", "расскажи что-нибудь", "", &out); err != nil {
 		t.Fatalf("an exit was reported as a failure: %v", err)
 	}
 	if !strings.Contains(out.String(), "stepped aside") {
@@ -112,7 +124,7 @@ func TestEveryShippedSkillLoads(t *testing.T) {
 	for _, path := range shippedSkills(t) {
 		t.Run(path, func(t *testing.T) {
 			var out bytes.Buffer
-			err := run(path, "подбери десерт", &out)
+			err := run(path, "подбери десерт", "", &out)
 			// Running is allowed to fail — most of these skills need tools this
 			// example does not implement. Loading is not.
 			if err != nil && strings.Contains(err.Error(), "skill-engine:") {
@@ -147,4 +159,57 @@ func shippedSkills(t *testing.T) []string {
 		}
 	}
 	return out
+}
+
+// The A/B QUICKSTART.md walks a reader through: one skill carrying both
+// descriptions, the same request, one flag changed.
+//
+// What is checked here is the mechanism and the direction, not a benchmark —
+// the stub charges by prompt length, so the numbers are the shape of the real
+// ones rather than the real ones. In prose the dictionary of sections rides
+// into the prompt and the model has to apply it; in steps the conditions
+// applied it before any generation happened, and the prompt carries only what
+// was found.
+func TestSameSkillBothWays(t *testing.T) {
+	withStub(t, "Тирамису и чай.")
+
+	var prose, steps bytes.Buffer
+	if err := run("../skills/menu.yaml", "подбери десерт и напиток", "playbook", &prose); err != nil {
+		t.Fatalf("the prose half does not run: %v", err)
+	}
+	if err := run("../skills/menu.yaml", "подбери десерт и напиток", "workflow", &steps); err != nil {
+		t.Fatalf("the steps half does not run: %v", err)
+	}
+
+	for _, out := range []*bytes.Buffer{&prose, &steps} {
+		if !strings.Contains(out.String(), "=== cost (") {
+			t.Fatalf("the run did not report what it cost:\n%s", out.String())
+		}
+	}
+	if p, s := promptTokens(t, &prose), promptTokens(t, &steps); s >= p {
+		t.Errorf("steps cost %d prompt tokens against prose %d — the dictionary should not reach the model at all", s, p)
+	}
+
+	// And the part a token count cannot show: in steps the sections are chosen
+	// before any generation, so a section nobody named cannot be fetched. In
+	// prose that is a request, and requests are followed probabilistically.
+	if !strings.Contains(steps.String(), "skipped: nothing_named, pick_main") {
+		t.Errorf("the steps half did not decide the sections deterministically:\n%s", steps.String())
+	}
+}
+
+func promptTokens(t *testing.T, out *bytes.Buffer) int {
+	t.Helper()
+	for _, line := range strings.Split(out.String(), "\n") {
+		if !strings.Contains(line, "prompt + ") {
+			continue
+		}
+		var p, c, total int
+		if _, err := fmt.Sscanf(strings.TrimSpace(line), "tokens: %d prompt + %d completion = %d", &p, &c, &total); err != nil {
+			t.Fatalf("cannot read the cost line %q: %v", line, err)
+		}
+		return p
+	}
+	t.Fatalf("no cost line in:\n%s", out.String())
+	return 0
 }

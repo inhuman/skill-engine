@@ -9,7 +9,15 @@ export OPENAI_API_KEY=…
 export OPENAI_MODEL=…
 
 go run . -skill ../skills/menu.yaml -input "подбери десерт и напиток"
+
+# the same file run the other way, when a skill carries both descriptions
+go run . -skill ../skills/menu.yaml -mode playbook -input "подбери десерт и напиток"
 ```
+
+`-mode` overrides the skill's own `mode`, which is what makes the A/B in
+[QUICKSTART.md](../../QUICKSTART.md) a one-word change: same file, same model,
+same request. Each run reports what it cost — generations and tokens — so the
+two halves can be compared rather than argued about.
 
 ## What it shows
 

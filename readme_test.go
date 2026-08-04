@@ -19,23 +19,29 @@ import (
 // reader of the Russian file must not be reading a version of the library that
 // no longer exists.
 func TestBothReadmesHaveTheSameShape(t *testing.T) {
-	en := mustRead(t, "README.md")
-	ru := mustRead(t, "README.ru.md")
+	forEachTranslatedPair(t, "README.md", "README.ru.md")
+	forEachTranslatedPair(t, "QUICKSTART.md", "QUICKSTART.ru.md")
+}
+
+func forEachTranslatedPair(t *testing.T, enPath, ruPath string) {
+	t.Helper()
+	en := mustRead(t, enPath)
+	ru := mustRead(t, ruPath)
 
 	enSections, ruSections := sectionsOf(string(en)), sectionsOf(string(ru))
 	require.Equal(t, len(enSections), len(ruSections),
-		"the two READMEs have a different number of sections:\nEN: %s\nRU: %s",
-		strings.Join(enSections, " | "), strings.Join(ruSections, " | "))
+		"%s and %s have a different number of sections:\nEN: %s\nRU: %s",
+		enPath, ruPath, strings.Join(enSections, " | "), strings.Join(ruSections, " | "))
 
 	assert.Equal(t, strings.Count(string(en), "```"), strings.Count(string(ru), "```"),
-		"one README gained or lost a code sample")
+		"%s and %s: one of them gained or lost a code sample", enPath, ruPath)
 
 	// The links a cold reader arrives by. A broken one in a file linked from an
 	// article is the cheapest possible way to lose them.
 	for _, doc := range []string{string(en), string(ru)} {
 		for _, path := range localLinks(doc) {
 			_, err := os.Stat(path)
-			assert.NoErrorf(t, err, "README links to %s, which does not exist", path)
+			assert.NoErrorf(t, err, "%s links to %s, which does not exist", enPath, path)
 		}
 	}
 }

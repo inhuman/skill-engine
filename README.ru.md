@@ -18,9 +18,14 @@
 go get github.com/inhuman/skill-engine
 ```
 
-**Начинать отсюда:** [`examples/`](examples/) — сам формат в
+**Начинать отсюда → [QUICKSTART.ru.md](QUICKSTART.ru.md).** Пятнадцать минут, в
+конце которых ты прогнал один и тот же скилл ДВУМЯ способами — промптом и
+шагами — на одном запросе и увидел разницу в том, сколько это стоило и что при
+этом произошло. Шаги 1–5 не требуют модели вовсе.
+
+**Дальше → [`examples/`](examples/):** сам формат в
 [`examples/skills/`](examples/skills/) и два рабочих приложения, встраивающих
-движок: [`simple-llm-app`](examples/simple-llm-app/) на OpenAI-совместимом
+движок, — [`simple-llm-app`](examples/simple-llm-app/) на OpenAI-совместимом
 эндпоинте и голом `net/http` и [`eino-llm-app`](examples/eino-llm-app/), где
 модель достаётся через фреймворк. Оба гоняются в тестах без сети.
 
