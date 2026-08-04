@@ -6,6 +6,7 @@ package skillengine
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
@@ -114,7 +115,7 @@ func newState(f *Flow, deps Deps, vars map[string]string) (*state, error) {
 		onStep: deps.OnStep, onStepStart: deps.OnStepStart,
 		assets: f.Assets, assetsRes: deps.Assets, memory: deps.Memory,
 		vocab:      deps.Vocabulary,
-		assetCache: map[string]string{}, seeded: map[string]bool{}}
+		assetCache: map[string]string{}, assetMu: &sync.Mutex{}, seeded: map[string]bool{}}
 	for k, v := range f.Vars {
 		st.vars[k] = v
 		st.seeded[k] = true
@@ -151,7 +152,13 @@ type state struct {
 	vocab Vocabulary
 	// assetCache — content already fetched in THIS turn: one asset consumed by
 	// three steps is fetched once.
+	//
+	// Shared with the branches of a `parallel` step rather than copied into
+	// them, so an asset three branches need is still fetched once — which is
+	// why it needs a lock, and why the lock is a POINTER: a forked state copies
+	// the struct, and a mutex copied by value is a mutex that guards nothing.
 	assetCache map[string]string
+	assetMu    *sync.Mutex
 	// assetCtx — the turn's context for resolving payloads. expand() is called
 	// from places with no ctx at hand, and threading it through every
 	// signature for the sake of one branch costs more than storing it here:

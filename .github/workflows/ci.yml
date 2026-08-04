@@ -21,6 +21,13 @@ jobs:
       # outside the declared list.
       - name: Test
         run: go test ./... -count=1
+      # Branches of a `parallel` step run in goroutines that share what the flow
+      # was given. That sharing is deliberate — an asset three branches need is
+      # fetched once — and it is exactly the kind of thing only the race
+      # detector notices: a bug here is a wrong answer on a busy day, not a
+      # crash on a quiet one.
+      - name: Race
+        run: go test ./... -count=1 -race
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.3.0 ./...
 

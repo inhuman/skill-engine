@@ -21,6 +21,34 @@ wrap skills in something of your own — front matter, a markdown body, several
 documents in one file — unwrap before calling and wrap the result back;
 anything else is refused rather than guessed at.
 
+## 2.2.3
+
+An engine fix; the format itself did not change.
+
+- **Fixed**: a branch of a `parallel` step did not inherit the assets, their
+  resolver, cache and context, working memory, or the application's vocabulary.
+  The sub-state was assembled by listing fields, and those six were not on the
+  list.
+
+  Nothing failed loudly. An unknown asset expands to an empty string by
+  contract, so `{{asset:x}}` inside a branch quietly became "" and the tool call
+  that needed it lost a required argument — with the error pointing at the
+  argument rather than at the substitution. Working memory and the vocabulary
+  went the same way: a step in a branch read a preview instead of the whole
+  value, and `one_of` lost its tie-breaker.
+
+  It stayed hidden because in a live catalogue of 29 skills no `call` step with
+  an asset had ever sat inside a `parallel` branch.
+
+  The branch state is now FORKED from the flow's and the few branch-local
+  fields are reset explicitly, so a field added to the engine reaches branches
+  by default. The list had the opposite default, and whoever adds a field is
+  not thinking about `parallel`.
+
+  The asset cache is shared with the branches rather than copied into them, so
+  an asset three branches need is still fetched once — under a lock held across
+  the resolve. CI now runs the race detector.
+
 ## 2.2.2
 
 An engine fix; the format itself did not change.
