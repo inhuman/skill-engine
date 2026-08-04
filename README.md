@@ -2,16 +2,63 @@
 
 **English** · [Русский](README.ru.md)
 
+[![Version](https://img.shields.io/github/v/tag/inhuman/skill-engine?sort=semver&style=flat-square&label=version)](https://github.com/inhuman/skill-engine/tags)
+[![Build](https://img.shields.io/github/actions/workflow/status/inhuman/skill-engine/ci.yml?style=flat-square&logo=github)](https://github.com/inhuman/skill-engine/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/inhuman/skill-engine.svg)](https://pkg.go.dev/github.com/inhuman/skill-engine)
+[![Go Report Card](https://goreportcard.com/badge/github.com/inhuman/skill-engine?style=flat-square)](https://goreportcard.com/report/github.com/inhuman/skill-engine)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/inhuman/skill-engine?style=flat-square&logo=go)](https://go.dev/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
+
 An engine for declarative programs for an LLM agent: a skill is described in
 **steps**, and control over the turn belongs to the code, not to the model.
 Steps are not the only form: a skill with only a `playbook` (a free-form
 instruction) is a full skill too (see "A prompt works as well").
+
+```
+go get github.com/inhuman/skill-engine
+```
+
+**Start here:** [`examples/`](examples/) — the format in
+[`examples/skills/`](examples/skills/), and two working applications that embed
+the engine: [`simple-llm-app`](examples/simple-llm-app/) on an
+OpenAI-compatible endpoint with nothing but `net/http`, and
+[`eino-llm-app`](examples/eino-llm-app/) with the model reached through a
+framework. Both run offline in their tests.
 
 **No dependencies** — production code runs on the standard library alone: the
 engine is embedded into someone else's application, and every dependency here
 would become a dependency of the embedder. YAML parsing is passed in as a
 parameter (the `Unmarshal` type), version comparison is implemented in place.
 The boundary is held by a guard test, `imports_test.go`, test imports included.
+
+## Status
+
+**Where it runs.** The engine was taken out of a working assistant, where it
+executes that assistant's whole skill catalogue — around thirty skills, in
+production. It is not a design sketch: every field in the format is there
+because something broke without it, and the comment beside the field says what.
+
+**Library version — `v0.5.x`.** Below `1.0` the **Go API may still move**: a
+type can gain a field, a function a parameter. What is already stable is the
+**format** — skill files are versioned separately and on their own rules.
+
+**Format version — `2.2.2`** (`EngineVersion` in `version.go`). A skill declares
+the minimum it needs in `skill_engine_version`, and a foreign MAJOR is refused
+in both directions: a description of a previous major would parse without a
+single complaint, silently losing fields the structs no longer have. What
+changed in each version, and what a migration does, is in
+[CHANGELOG.md](CHANGELOG.md).
+
+**If you have skills written for format 1.x**, they do not load: that is the
+refusal above, working as intended. `Migrate(raw)` rewrites them — it edits the
+file as text, so comments, key order and block scalars survive — but until you
+run it those skills do not execute at all, including on a schedule. Better said
+here than discovered on a Monday morning.
+
+**Tests.** 89.3% statement coverage in the engine, 95.1% in the linter, plus
+guard tests for the properties that prose cannot hold: no dependencies, no
+direct reads of the variable map, the two schema translations staying
+structurally identical, and the example applications staying separate modules.
 
 ## Why
 
@@ -21,10 +68,52 @@ the model read before it started acting. In steps the same thing is expressed
 structurally: in the unconfirmed branch the `retract` call **is not there**, a
 `call` step cannot be repeated, a branch that does not apply does not run.
 
-Measurements on live skills (tool calls / seconds, before → after): three
-skills of one catalogue went 18/95 → **2/6**, 7/33 → **2/5** and 9/29 →
-**5/11**. What they did is beside the point — what changed is who held the
-control flow.
+Measured on a live catalogue — tool calls / seconds, before → after moving a
+skill from prose into steps: 18/95 → **2/6**, 7/33 → **2/5**, 9/29 → **5/11**.
+What those skills did is beside the point; what changed is who held the control
+flow.
+
+And one that went the other way. A log-searching skill cost **43k tokens as
+steps against 36k as prose** — because knowledge is expensive in a step WITH
+tools: an asset rides along into every generation of the react loop. Three wins
+and no losses read as advertising, and this is the shape of the case where the
+format does not pay.
+
+What is NOT established about these numbers: how many runs per scenario, the
+spread between them, and whether anything besides the form of the description
+changed. Until that is measured, read them as an order of magnitude rather than
+as a benchmark.
+
+## What this is not
+
+The neighbours are worth naming, because the differences are architectural
+rather than a matter of taste.
+
+**Not a process orchestrator** (Temporal, n8n). The engine owns no state between
+turns, has no storage of its own and does not survive a restart: a turn runs
+inside somebody else's application and ends with it. Comparing durability is
+comparing different jobs — if you need a workflow that resumes after a crash
+three days later, this is the wrong tool and nothing here will make it right.
+
+**Not an agent framework** (LangGraph and its relatives). There the graph is
+written by the application's developer, in the application's language, and it
+ships with the application. Here the steps are written by the SKILL'S author, in
+YAML, and the skill is portable between hosts — which is why the format has a
+version of its own and why `Migrate` exists at all. A skill is data your users
+can write; a graph is code you deploy.
+
+**Zero dependencies is a consequence, not a pose.** An engine embedded into
+someone else's application makes every one of its dependencies theirs, with
+their versions and their conflicts. So YAML arrives as a parameter (the
+`Unmarshal` type), version comparison is thirty lines instead of a library, and
+`imports_test.go` fails the build the moment production code imports anything at
+all. Rare enough to be worth naming where you are comparing.
+
+**When you do NOT need this.** One or two steps and no branching — prose is
+cheaper, and the format says so itself (see "A prompt works as well"). The
+engine starts paying where a turn has branches, a loop, a tool set that must
+narrow, or a guard that has to be impossible to violate rather than merely
+asked for.
 
 ## A prompt works as well
 
