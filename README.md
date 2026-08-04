@@ -73,21 +73,43 @@ the model read before it started acting. In steps the same thing is expressed
 structurally: in the unconfirmed branch the `retract` call **is not there**, a
 `call` step cannot be repeated, a branch that does not apply does not run.
 
-Measured on a live catalogue — tool calls / seconds, before → after moving a
-skill from prose into steps: 18/95 → **2/6**, 7/33 → **2/5**, 9/29 → **5/11**.
-What those skills did is beside the point; what changed is who held the control
-flow.
+### What it changed, measured on live traffic
 
-And one that went the other way. A log-searching skill cost **43k tokens as
-steps against 36k as prose** — because knowledge is expensive in a step WITH
-tools: an asset rides along into every generation of the react loop. Three wins
-and no losses read as advertising, and this is the shape of the case where the
-format does not pay.
+Not a benchmark of one question run twice — the event log of a working
+installation: every turn where a skill matched, over five weeks, questions asked
+by people rather than by the author of the skill. The metric is **LLM
+generations per turn**, orchestrator and subagents together.
 
-What is NOT established about these numbers: how many runs per scenario, the
-spread between them, and whether anything besides the form of the description
-changed. Until that is measured, read them as an order of magnitude rather than
-as a benchmark.
+The catalogue moved from prose to steps on one day, and the periods are split by
+that date.
+
+| | |
+|---|---:|
+| skills with at least 5 turns on each side | **23** |
+| turns compared | **5 280** (3 469 prose, 1 811 steps) |
+| significantly cheaper (Mann–Whitney, p<0.05) | **20** |
+| significantly more expensive | **1** |
+| no significant difference | **2** |
+
+The effect is a median of −18 to −0.5 generations per turn. The largest: a
+triage skill went from a median of **38 generations per turn to 20**. Typical:
+**7 → 3**.
+
+**And the one that got worse.** A health-checking skill went the other way —
+median **6 → 10** generations, p<0.001. It is in the table on purpose: twenty
+wins and no losses read as advertising, and one measured loss is what makes the
+other twenty worth reading. Which mechanism did it the measurement does not
+say — it counts generations, not reasons — and the invariants below list the
+ways a step gets MORE expensive, starting with knowledge inside a step that has
+tools.
+
+**What this is and is not.** The periods are separated by a DATE, not by
+randomisation, and other things changed in those same days — the engine was
+being edited alongside the skills. So this is an **observational before/after
+comparison, not an experiment**: it shows that the catalogue got cheaper across
+that boundary, not that nothing else contributed. The underlying event log
+belongs to a private installation, so what is published here is the aggregate
+rather than the raw data.
 
 ## What this is not
 

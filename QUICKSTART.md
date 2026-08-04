@@ -329,14 +329,15 @@ Two working applications to copy from:
   to decide to call a tool, call it, and read the result back. The stub cannot
   call tools, so it does that work in one generation and the gap in the table
   above is understated, not overstated.
-- The accuracy claim — a classifier step at temperature 0 getting 5 of 10 live
-  requests right where the same dictionary in a condition got 10 — is measured
-  on somebody else's catalogue, and the README says plainly what is not
-  established about it.
-- One counterexample, on purpose: a log-searching skill cost **43k tokens as
-  steps against 36k as prose**, because knowledge is expensive in a step WITH
-  tools — an asset rides into every generation of the loop. Steps are not
-  free; they are cheaper where the turn has branches, loops and guards.
+- The real numbers are in [README.md](README.md): a live installation's event
+  log, 5 280 turns over five weeks, 23 skills — 20 significantly cheaper, 1
+  significantly more expensive, 2 unchanged. That comparison is
+  **observational**: the periods are split by a date rather than randomised, and
+  other things changed in those same days.
+- One counterexample, on purpose: a health-checking skill went the other way,
+  a median of **6 → 10 generations per turn**. Steps are not free; they are
+  cheaper where the turn has branches, loops and guards, and this is what the
+  other case looks like.
 
 ---
 
