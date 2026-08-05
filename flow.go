@@ -571,26 +571,108 @@ func collectTools(steps []Step, flowTools []string, out *[]ToolRef) {
 
 // Validate checks a description before execution: an empty flow, a step with no
 // action, two actions in one step, a reference to an unknown policy.
+//
+// It does NOT touch the description it was given. Validation needs the steps in
+// the shape execution reads them — profiles folded in, a `save_as` written
+// beside a call moved into it — and doing that in place had two consequences
+// worth avoiding: a caller holding a parsed Flow saw the engine's working copy
+// instead of the file they parsed, and two turns over the same *Flow wrote to
+// the same structs from two goroutines. "Parse once, run many times" is the
+// natural way to use a skill engine, so it has to be the safe one.
 func (f *Flow) Validate() error {
+	_, err := f.normalized()
+	return err
+}
+
+// normalized returns the description as EXECUTION reads it: a copy of the flow
+// with the steps normalised, profiles folded in, and everything checked.
+//
+// The copy is the point. Only the steps are copied — assets, vars and profiles
+// are read and never written, so they are shared.
+func (f *Flow) normalized() (*Flow, error) {
 	if f == nil || len(f.Steps) == 0 {
-		return fmt.Errorf("skill-engine: empty flow — not a single step")
+		return nil, fmt.Errorf("skill-engine: empty flow — not a single step")
 	}
-	if err := normalizeSteps(f.Steps, "steps"); err != nil {
-		return err
+	out := *f
+	out.Steps = cloneSteps(f.Steps)
+
+	if err := normalizeSteps(out.Steps, "steps"); err != nil {
+		return nil, err
 	}
-	if err := validateAssets(f.Assets); err != nil {
-		return fmt.Errorf("skill-engine: %w", err)
+	if err := validateAssets(out.Assets); err != nil {
+		return nil, fmt.Errorf("skill-engine: %w", err)
 	}
-	if err := validateProfiles(f.Profiles); err != nil {
-		return fmt.Errorf("skill-engine: %w", err)
+	if err := validateProfiles(out.Profiles); err != nil {
+		return nil, fmt.Errorf("skill-engine: %w", err)
 	}
 	// Before validateSteps, deliberately: from here on a step that inherited
 	// its model from a profile HAS a model, so every check downstream — the
 	// response_schema pairing above all — sees the step as it will execute.
-	if err := applyProfiles(f.Steps, f.Profiles, "steps"); err != nil {
-		return err
+	if err := applyProfiles(out.Steps, out.Profiles, "steps"); err != nil {
+		return nil, err
 	}
-	return validateSteps(f.Steps, "steps")
+	if err := validateSteps(out.Steps, "steps"); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// cloneSteps deep-copies the steps down to everything normalisation writes to:
+// the step itself, the Run/Call/Delegate it points at, and the nested step
+// lists of every branching kind.
+//
+// Anything not copied here is something the engine only READS. If a future
+// pass starts writing to a field that is still shared, this is where it has to
+// be added — and the tests around Validate are what will notice.
+func cloneSteps(steps []Step) []Step {
+	if steps == nil {
+		return nil
+	}
+	out := make([]Step, len(steps))
+	for i, s := range steps {
+		out[i] = s // the value, then everything it points at
+		if s.Run != nil {
+			run := *s.Run
+			out[i].Run = &run
+		}
+		if s.Call != nil {
+			call := *s.Call
+			out[i].Call = &call
+		}
+		if s.Delegate != nil {
+			d := *s.Delegate
+			out[i].Delegate = &d
+		}
+		if s.Switch != nil {
+			sw := *s.Switch
+			sw.Cases = make(map[string][]Step, len(s.Switch.Cases))
+			for k, br := range s.Switch.Cases {
+				sw.Cases[k] = cloneSteps(br)
+			}
+			sw.Default = cloneSteps(s.Switch.Default)
+			out[i].Switch = &sw
+		}
+		if s.If != nil {
+			ifs := *s.If
+			ifs.Then = cloneSteps(s.If.Then)
+			ifs.Else = cloneSteps(s.If.Else)
+			out[i].If = &ifs
+		}
+		if s.ForEach != nil {
+			fe := *s.ForEach
+			fe.Steps = cloneSteps(s.ForEach.Steps)
+			out[i].ForEach = &fe
+		}
+		if s.Parallel != nil {
+			par := *s.Parallel
+			par.Branches = make([][]Step, len(s.Parallel.Branches))
+			for j, br := range s.Parallel.Branches {
+				par.Branches[j] = cloneSteps(br)
+			}
+			out[i].Parallel = &par
+		}
+	}
+	return out
 }
 
 // normalizeSteps brings a description to the shape execution reads it in.
