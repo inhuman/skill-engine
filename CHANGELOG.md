@@ -21,6 +21,46 @@ wrap skills in something of your own — front matter, a markdown body, several
 documents in one file — unwrap before calling and wrap the result back;
 anything else is refused rather than guessed at.
 
+## 2.2.4
+
+Engine fixes; the format itself did not change. One of them **changes
+behaviour** — read the first item before upgrading.
+
+- **Fixed, and a behaviour change**: a model step could WIDEN an empty tool set.
+  With `tools: []` on the flow and `tools: [something]` on the step, the step was
+  handed `something` — the guard the flow was written for, undone by the step it
+  was written against.
+
+  The `call` path had always answered the opposite way (`allowServer`: "an empty
+  flow set is NOT everything is allowed"), so one flow had two access policies
+  depending on the kind of step. Now both hand out nothing.
+
+  **If a skill of yours relies on naming tools per step while the flow declares
+  none, those steps now receive an empty set.** The fix is to say on the flow
+  which servers it may reach; a step still narrows from there.
+
+- **Fixed**: a missing `Deps.Runner` panicked instead of failing. `call` and
+  `delegate` had always reported a missing executor as an ordinary step failure,
+  subject to `on_error`; an instruction step dereferenced nil and took the
+  process with it — a stack trace where "you did not pass Deps.Runner" belonged.
+
+- **Fixed**: `Flow.Validate` rewrote the description it was given. Validation
+  needs the steps in the shape execution reads them — profiles folded in, a
+  `save_as` beside a call moved into it — and it did that in place. Two
+  consequences: a caller holding a parsed Flow saw the engine's working copy
+  instead of the file they parsed, and two turns over one `*Flow` wrote to the
+  same structs from two goroutines.
+
+  Validation now works on a copy, and execution runs that copy. "Parse once, run
+  many times" — including concurrently — is safe, which for a skill engine is
+  the natural way to use it.
+
+- **Documented, not changed**: everything in `Deps` may be called concurrently.
+  Within one turn the branches of a `parallel` run at once; across turns one
+  `Deps` usually serves the whole application. Ordinary clients already are safe
+  for that — a hand-written double or a callback accumulating into a slice is
+  where it gets forgotten.
+
 ## 2.2.3
 
 An engine fix; the format itself did not change.

@@ -133,6 +133,31 @@ that boundary, not that nothing else contributed. The underlying event log
 belongs to a private installation, so what is published here is the aggregate
 rather than the raw data.
 
+### Two benefits, and they do not scale together
+
+Fewer generations per turn is **fewer tokens**, and tokens are either an invoice
+or an occupied GPU, plus the seconds someone spends waiting. That saving is
+arithmetic and the same whatever model you run: a call removed is its cost
+removed.
+
+Whether the turn **lands** is a different benefit, and it depends on the model
+reading the skill. A large model reads a long prose skill to the end and mostly
+does what it says, guards at the bottom included — for it, steps save money more
+than they change outcomes. A smaller model loses on that same prose: it falls
+back to a default and drops what the request NAMED, which is exactly what the
+dictionary measurement above shows — 5 of 10 against 10 of 10 with a condition,
+where the difference is not the price but the answer.
+
+So the smaller the model, the more of the value sits in behaviour rather than in
+cost. That matters in practice, because a model running inside someone's own
+perimeter is usually the one that fit on the GPUs rather than the largest one
+there is.
+
+**This is a hypothesis, not a result.** Checking it means running one catalogue
+across model classes, and the measurement above comes from one installation
+whose models are of one class. It explains those numbers rather than following
+from them.
+
 ## What this is not
 
 The neighbours are worth naming, because the differences are architectural
@@ -388,7 +413,12 @@ out, outcome, err := skillengine.ExecuteWith(ctx, flow, skillengine.Deps{
 - `Outcome.AnsweredBy` — `instruction` or `call`: what wrote the answer. Needed
   so that post-processing does not rewrite a script's deterministic output.
 
-`OnStepStart` and `OnStep` **must be safe for concurrent use**: they fire from
+Everything in `Deps` **must be safe for concurrent use**: within one turn the
+branches of a `parallel` run at once, and across turns one `Deps` usually serves
+the whole application. Ordinary clients already are; a hand-written double or a
+callback accumulating into a slice is where it gets forgotten.
+
+`OnStepStart` and `OnStep` in particular: they fire from
 the goroutine that ran the step, and the branches of a `parallel` run in several
 at once. A callback appending to a slice needs its own lock. The engine does not
 serialise them on purpose — a lock there would hold up a branch for the duration

@@ -193,6 +193,16 @@ func (s *state) runStep(ctx context.Context, step Step) (bool, error) {
 		MaxToolErrors:  run.MaxToolErrors,
 	}
 	started := time.Now()
+	// Symmetric to the call and delegate paths, which have always said this: a
+	// missing executor is the EMBEDDER's configuration error, and it has to
+	// read like one. Without the check a model step dereferenced nil and took
+	// the process down — a stack trace where "you did not pass Deps.Runner"
+	// belonged, and no chance for the step's own on_error to have a say.
+	if s.runner == nil {
+		err := errors.New("instruction steps are unavailable: Deps.Runner is not set")
+		s.trace(step, outcomeFor(err), err.Error(), 0, started)
+		return s.onError(step, err)
+	}
 	res, err := s.runner.Run(ctx, req)
 	if err == nil {
 		err = res.Err
@@ -708,7 +718,16 @@ func (s *state) toolsFor(run *Run) []string {
 		return []string{} // the step gets no tools at all
 	}
 	if len(s.tools) == 0 {
-		return want
+		// An empty flow set hands out NOTHING, and a step cannot widen it back.
+		// This used to return the step's own list, which put a server the flow
+		// does not have in front of the model — the guard undone by the step it
+		// was written against.
+		//
+		// The `call` path has always answered this the other way (see
+		// allowServer, "an empty flow set is NOT everything is allowed"), and
+		// two answers to one question is how a restriction stops meaning
+		// anything. A flow that means to hand out tools says which.
+		return []string{}
 	}
 	allowed := make(map[string]bool, len(s.tools))
 	for _, t := range s.tools {

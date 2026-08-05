@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,7 +14,12 @@ import (
 
 // fakeRunner records what exactly the step executor was asked for and returns
 // preset answers. Failures are keyed by step name.
+// fakeRunner stands in for an embedder's model client, and like a real one it
+// may be called from several goroutines at once: the branches of a `parallel`
+// run concurrently, and one Deps commonly serves many turns. Hence the lock —
+// it is part of what this double is modelling, not test hygiene.
 type fakeRunner struct {
+	mu     sync.Mutex
 	seen   []StepRequest
 	answer map[string]string
 	fail   map[string]error
@@ -23,6 +29,8 @@ type fakeRunner struct {
 }
 
 func (f *fakeRunner) Run(_ context.Context, req StepRequest) (Result, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.seen = append(f.seen, req)
 	if err, ok := f.fail[req.Name]; ok {
 		return Result{}, err

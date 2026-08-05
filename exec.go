@@ -13,6 +13,12 @@ import (
 // Deps — the executors the engine receives from outside. A struct rather than
 // an argument list: there are several, and adding one more must not force an
 // edit at every call site.
+//
+// EVERYTHING HERE MAY BE CALLED CONCURRENTLY. Within one turn the branches of a
+// `parallel` step run at once, and across turns one Deps commonly serves the
+// whole application — a single model client, a single tool transport. Ordinary
+// clients already are safe for concurrent use; a hand-written double or a
+// callback that accumulates into a slice is where this gets forgotten.
 type Deps struct {
 	Runner   Runner
 	Caller   ToolCaller
@@ -74,7 +80,10 @@ func ExecuteWith(ctx context.Context, f *Flow, deps Deps, vars map[string]string
 		return nil, Outcome{}, err
 	}
 	st.assetCtx = ctx
-	_, runErr := st.run(ctx, f.Steps)
+	// st.steps, not f.Steps: the engine runs its own normalised copy, so the
+	// description the caller holds is never written to — which is what lets one
+	// parsed Flow serve many turns, including concurrent ones.
+	_, runErr := st.run(ctx, st.steps)
 	return st.produced(), Outcome{Skipped: st.skipped, Steps: st.traces, AnsweredBy: st.answeredBy}, runErr
 }
 
@@ -129,10 +138,12 @@ type Outcome struct {
 }
 
 func newState(f *Flow, deps Deps, vars map[string]string) (*state, error) {
-	if err := f.Validate(); err != nil {
+	norm, err := f.normalized()
+	if err != nil {
 		return nil, err
 	}
-	st := &state{vars: map[string]string{}, tools: f.Tools,
+	f = norm
+	st := &state{vars: map[string]string{}, tools: f.Tools, steps: f.Steps,
 		runner: deps.Runner, caller: deps.Caller, delegate: deps.Delegate,
 		onStep: deps.OnStep, onStepStart: deps.OnStepStart,
 		assets: f.Assets, assetsRes: deps.Assets, memory: deps.Memory,
@@ -150,7 +161,10 @@ func newState(f *Flow, deps Deps, vars map[string]string) (*state, error) {
 }
 
 type state struct {
-	vars     map[string]string
+	vars map[string]string
+	// steps — the engine's own normalised copy of the description (see
+	// Flow.normalized). The caller's Flow is never written to.
+	steps    []Step
 	tools    []string
 	runner   Runner
 	caller   ToolCaller
