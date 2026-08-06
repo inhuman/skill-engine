@@ -1,0 +1,45 @@
+# Asset names that do not line up with the assets.
+#
+# Defects: W19 (a step references `countr`, and the skill declares `counter`),
+# W20 (`leftover` is declared and nobody reads it).
+#
+# Nothing fails here at the point of the mistake. The engine expands an unknown
+# asset to an EMPTY STRING on purpose — a marker left in an instruction would be
+# read by the model as part of it — so the typo becomes emptiness, and what
+# breaks is whatever stood next to it: the call below is rejected by the server
+# for a MISSING ARGUMENT, and the error names `code` rather than the
+# substitution a floor above.
+
+skill_engine_version: "2.2.0"
+skill_version: "1.0.0"
+name: asset-names
+description: A fixture — an asset referenced under a name nobody declared.
+trigger_examples: ["a fixture phrase about assets"]
+servers: ["docs"]
+role: reader
+
+workflow:
+  tools: ["docs"]
+
+  assets:
+    counter:
+      kind: code
+      source: inline
+      params: {lang: python}
+      content: |
+        import sys
+        print(len(sys.stdin.read().splitlines()))
+
+    leftover:
+      kind: text
+      source: inline
+      content: "outlived the step that used to read it"
+
+  steps:
+    - name: run
+      call:
+        tool: "docs:page_get"
+        args:
+          title: "a page"
+          code: {from: "asset:countr"}
+        save_as: out

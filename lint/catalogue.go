@@ -19,8 +19,18 @@ type Rule struct {
 	Title string
 	// Emits — the severities the rule can produce.
 	Emits []Severity
-	// Needs — the Facts and Options fields the rule cannot run without. Empty
-	// means it only needs the skill itself.
+	// Needs — the Facts and Options fields the rule cannot run without.
+	//
+	// PARTIAL for some rules: what is listed may be needed by only one of the
+	// checks a rule makes, and the rest run regardless. W2 is the example — it
+	// checks a skill against ITSELF and against the installation, and only the
+	// second half needs a registry. Where that is so, the Title says which part
+	// needs nothing.
+	//
+	// So this field answers "what makes this rule complete", not "what makes it
+	// run at all". A caller deciding a rule is irrelevant because a fact is
+	// missing would switch off checks that never needed it — which is exactly
+	// the failure that split W2 into two passes.
 	Needs []string
 }
 
@@ -39,7 +49,7 @@ func Rules() []Rule {
 		{ID: "W1", Emits: []Severity{SeverityError},
 			Title: "the description does not pass the engine's own validation"},
 		{ID: "W2", Emits: []Severity{SeverityError}, Needs: []string{"Facts.ServerNames"},
-			Title: "a server the program names is declared by the skill and registered"},
+			Title: "a server the program names is declared by the skill (needs nothing) and registered (needs the registry)"},
 		{ID: "W3", Emits: []Severity{SeverityError}, Needs: []string{"Facts.AllTools"},
 			Title: "a call step's tool exists on its server"},
 		{ID: "W4", Emits: []Severity{SeverityWarn}, Needs: []string{"Options.Assets"},
@@ -59,7 +69,7 @@ func Rules() []Rule {
 		{ID: "W11", Emits: []Severity{SeverityWarn}, Needs: []string{"Options.Assets"},
 			Title: "an asset's params are keys the resolver actually reads"},
 		{ID: "W12", Emits: []Severity{SeverityWarn}, Needs: []string{"Options.CallProtocol", "Facts.AllTools"},
-			Title: "an instruction names a tool without saying how tools are called"},
+			Title: "an instruction names a tool without saying how tools are called — ENTIRELY dependent on a live tool listing, so it does not run offline"},
 		{ID: "W13", Emits: []Severity{SeverityWarn}, Needs: []string{"Options.FreeTextFields"},
 			Title: "a free-text field of a response schema has a length ceiling (fields inside arrays need no vocabulary)"},
 		{ID: "W14", Emits: []Severity{SeverityError},
@@ -72,6 +82,10 @@ func Rules() []Rule {
 			Title: "`switch.var` is given a variable's name, not a {{template}}"},
 		{ID: "W18", Emits: []Severity{SeverityWarn},
 			Title: "no alternative of a `contains` is already covered by a shorter one"},
+		{ID: "W19", Emits: []Severity{SeverityError},
+			Title: "every asset a step references is declared by the skill"},
+		{ID: "W20", Emits: []Severity{SeverityWarn},
+			Title: "every asset the skill declares is referenced by a step"},
 
 		{ID: "E1", Emits: []Severity{SeverityError}, Needs: []string{"Facts.ServerNames"},
 			Title: "every server the skill declares is registered"},

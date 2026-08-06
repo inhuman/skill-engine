@@ -26,6 +26,7 @@ var fixtureRules = map[string][]string{
 	"loose-schema.yaml":     {"W9", "W13", "W16"},
 	"payload.yaml":          {"W4", "W5", "W7", "W11", "W15", "W17", "E4"},
 	"dead-alternative.yaml": {"W18"},
+	"asset-names.yaml":      {"W19", "W20"},
 }
 
 func lintFixture(t *testing.T, name string) lint.Report {

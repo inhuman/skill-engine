@@ -95,7 +95,7 @@ package refuses to produce.
 | S5 | warn | the playbook's size against the budget — it is context weight on every run | — |
 | S6 | info | no `trigger_examples`: only reachable by being named outright | — |
 | W1 | error | the description does not pass the engine's own validation | — |
-| W2 | error | a server the program names is declared by the skill and registered | `Facts.ServerNames` |
+| W2 | error | a server the program names is declared by the skill, and registered | `Facts.ServerNames` — for the second half only; "declared by the skill" needs nothing |
 | W3 | error | a `call` step's tool exists on its server | `Facts.AllTools` |
 | W4 | warn | an asset is passed the way its kind implies — through the model's context or past it | `Options.Assets` |
 | W5 | error | a `call` step carries the arguments its tool requires | `Facts.ToolSchemas` |
@@ -105,13 +105,15 @@ package refuses to produce.
 | W9 | error | an object in a response schema has at least one `required` field | — |
 | W10 | error | `from:` in a call's arguments receives a handle, not the value's text | — |
 | W11 | warn | an asset's `params` are keys the resolver actually reads | `Options.Assets` |
-| W12 | warn | an instruction names a tool without saying how tools are called | `Options.CallProtocol`, `Facts.AllTools` |
+| W12 | warn | an instruction names a tool without saying how tools are called | `Options.CallProtocol`, `Facts.AllTools` — **entirely**: W12 does not run offline |
 | W13 | warn | a free-text field of a response schema has a length ceiling | `Options.FreeTextFields` (fields inside arrays need no vocabulary) |
 | W14 | error | every reference names a variable that exists at that point in the flow | — |
 | W15 | error | a declared built-in tool exists in the registry | `Facts.BuiltinTools` |
 | W16 | error | a required field is not one the description beside it allows to be empty | `Options.EmptyWords` |
 | W17 | error | `switch.var` is given a variable's name, not a `{{template}}` | — |
 | W18 | warn | no alternative of a `contains` is already covered by a shorter one | — |
+| W19 | error | every asset a step references is declared by the skill | — |
+| W20 | warn | every asset the skill declares is referenced by a step | — |
 | E1 | error | every server the skill declares is registered | `Facts.ServerNames` |
 | E2 | error | a tool the playbook calls exists on the server it names | `Options.CallProtocol`, `Facts.AllTools` |
 | E3 | warn | a read-only skill does not reach for a server that writes | `Options.ReadOnlyRoles`, `Facts.WriteServers` |
