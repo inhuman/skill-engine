@@ -264,7 +264,7 @@ if err := skill.Validate(); err != nil { … }
 ```
 
 ```go
-// Хорошо ли запустится? 29 правил про дефекты, которые молчат.
+// Хорошо ли запустится? 30 правил про дефекты, которые молчат.
 rep, err := lint.Lint(raw, facts, lint.Options{
     Unmarshal:  yaml.Unmarshal,
     EmptyWords: []string{"пусто", "empty"},
@@ -347,4 +347,4 @@ vars, outcome, err := se.ExecuteWith(ctx, skill.Workflow, se.Deps{
 | [`examples/`](examples/) | формат и два приложения, которые его встраивают |
 | [`skill.schema.ru.yaml`](skill.schema.ru.yaml) | каждое поле и отказ, которым оно оплачено |
 | [CHANGELOG.md](CHANGELOG.md) | что менялось в формате и что делает миграция |
-| [`lint/README.md`](lint/README.md) | 29 правил и что ловит каждое |
+| [`lint/README.md`](lint/README.md) | 30 правил и что ловит каждое |

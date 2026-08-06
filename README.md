@@ -9,14 +9,22 @@
 [![Go Version](https://img.shields.io/github/go-mod/go-version/inhuman/skill-engine?style=flat-square&logo=go)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
 
-An engine for declarative programs for an LLM agent: a skill is described in
-**steps**, and control over the turn belongs to the code, not to the model.
-Steps are not the only form: a skill with only a `playbook` (a free-form
-instruction) is a full skill too (see "A prompt works as well").
+**A deterministic runtime for one turn of an LLM agent.** A skill is a
+declarative program — steps, branches, loops, a tool radius — and this library
+executes it. The model decides *what* (classify, judge, word an answer); the
+code decides *what runs next*. A restriction written into a prompt is a
+request; a branch that does not exist cannot be taken.
 
 ```
 go get github.com/inhuman/skill-engine
 ```
+
+| | |
+|---|---|
+| **What it is** | a Go library, ≈8 800 lines, **zero dependencies** — the standard library alone |
+| **Where it runs** | a production assistant it was extracted from, ~30 skills in its catalogue |
+| **What it changed** | 23 skills over 5 280 live turns: **20 cheaper, 1 more expensive, 2 unchanged** in LLM generations per turn ([how it was measured](#the-problem-it-solves)) |
+| **What it is not** | not durable, not scheduled, not an agent framework — a turn runs inside your application and ends with it ([the neighbours](#where-it-fits)) |
 
 **Start here → [QUICKSTART.md](QUICKSTART.md).** Fifteen minutes, at the end of
 which you have run the same skill BOTH ways — as a prompt and as steps — on the
@@ -30,11 +38,134 @@ OpenAI-compatible endpoint with nothing but `net/http`, and
 [`eino-llm-app`](examples/eino-llm-app/) with the model reached through a
 framework. Both run offline in their tests.
 
-**No dependencies** — production code runs on the standard library alone: the
-engine is embedded into someone else's application, and every dependency here
-would become a dependency of the embedder. YAML parsing is passed in as a
-parameter (the `Unmarshal` type), version comparison is implemented in place.
-The boundary is held by a guard test, `imports_test.go`, test imports included.
+## What it is
+
+The engine is the **runtime of one turn**. It is not an agent, not a model
+client and not a framework: it takes a description of a turn and executes it,
+calling back into your application for everything that touches the outside
+world.
+
+- **A skill** is one YAML file: a header (name, trigger examples, servers,
+  role) plus a description of the turn — either a program (`workflow`: steps,
+  branches, loops) or a prompt (`playbook`). The file is data: your users can
+  write it, your CI can lint it, and it is portable between hosts, which is why
+  the FORMAT carries a version of its own.
+- **The engine** owns the order of execution: which step runs next, which
+  branch is taken, what a step is allowed to touch, what a variable holds, what
+  happens when a step comes back empty or fails.
+- **Your application** owns everything else — the model, the tools, storage,
+  telemetry, the catalogue — and hands it over as interfaces in `Deps`.
+
+**On the name.** The word "skill" here is not the vendor feature of the same
+name (a folder with an instruction and files, handed to a model to read). Those
+describe what a model is GIVEN; this describes what a runtime EXECUTES — the
+model never sees the control flow and cannot skip a guard by not reading far
+enough. If the word collides with something you already know, read "skill" as
+"a declarative workflow for one agent turn", and the rest of this file follows.
+
+## In 30 seconds
+
+A turn that picks the sections of a menu the request names, fetches them, and
+words an answer — the shape of any skill that has to look something up:
+
+```yaml
+# a fragment of examples/skills/menu.yaml
+workflow:
+  tools: [recipes]
+  steps:
+    - name: nothing_named                    # the honest exit
+      when: "input not contains десерт | сладк | напит | чай | горяч | второе"
+      exit: {reason: "the request names no section of the menu"}
+
+    - name: pick_dessert                     # a tool call WITHOUT a generation
+      when: "input contains десерт | сладк | dessert"
+      call: {tool: "recipes:search", args: {section: dessert}, save_as: desserts}
+
+    - name: pick_drink
+      when: "input contains напит | чай | кофе | drink"
+      call: {tool: "recipes:search", args: {section: drink}, save_as: drinks}
+
+    - name: answer                           # the only step that costs a generation
+      instruction: |
+        The request: {{input}}
+        Desserts: {{desserts}}
+        Drinks: {{drinks}}
+        Answer from what was found; say nothing about a section that came back empty.
+      tools: []                              # this step gets NO tools, structurally
+```
+
+The application supplies the two things the engine cannot do itself and reads
+the result:
+
+```go
+skill, err := skillengine.ParseSkill(raw, yaml.Unmarshal)   // your YAML parser
+vars, outcome, err := skillengine.ExecuteWith(ctx, skill.Workflow, skillengine.Deps{
+    Runner: myModel,     // you call the LLM
+    Caller: myTools,     // you call the tools
+}, map[string]string{"input": request})
+
+fmt.Println(vars[skillengine.AnswerVar])
+```
+
+What actually happened is a structure, not a log to grep — this is real output
+from [`examples/simple-llm-app`](examples/simple-llm-app/) with the model
+stubbed:
+
+```
+=== steps ===
+  nothing_named    exit        skipped  calls=0  condition ... is false
+  pick_dessert     call        ok       calls=1
+  pick_drink       call        ok       calls=1
+  pick_main        call        skipped  calls=0  condition ... is false
+  answer           instruction ok       calls=0
+  skipped: nothing_named, pick_main
+```
+
+Three sections were considered, two were fetched, one was not, and the model
+was used **once** — to word the answer. Which sections to fetch was decided by
+a condition rather than by a generation, the fetches cost no tokens at all, and
+a request naming no section leaves through `exit` before any of it. The same
+file also carries the prose version of the same turn, so both can be run on the
+same request: 227 tokens as a prompt against 102 as steps, and on a request
+that names nothing the prose half answers anyway
+([QUICKSTART.md](QUICKSTART.md) runs both halves).
+
+## Architecture
+
+```
+ ┌── your application ──────────────────────────────────────────────────────┐
+ │                                                                          │
+ │  skill.yaml ──ParseSkill──▶ Skill ──▶ ExecuteWith(ctx, flow, Deps, vars)  │
+ │                                                    │                     │
+ │      ┌─────────────────────────────────────────────▼───────────────────┐ │
+ │      │ skill-engine                                       stdlib only  │ │
+ │      │   order of steps · branches · loops · parallel · delegation     │ │
+ │      │   variables · tool radius · empty/error policy · versioning     │ │
+ │      └───┬──────────┬───────────┬────────────┬───────────┬─────────────┘ │
+ │          │ Runner   │ Caller    │ Delegate   │ Assets    │ Memory        │
+ │          ▼          ▼           ▼            ▼           ▼               │
+ │      your LLM    your tools   your skill   your files  your store        │
+ │      client      (MCP, HTTP)  catalogue                                  │
+ │                                                                          │
+ │  ◀── vars (what the steps produced) + Outcome (a trace of every step)     │
+ │  ◀── OnStepStart / OnStep — events as they happen, for telemetry and UI   │
+ └──────────────────────────────────────────────────────────────────────────┘
+```
+
+| | the engine | the application |
+|---|---|---|
+| decides | which step is next, which branch, what a step may touch | what a model call is, what a tool call is |
+| holds | variables of the current turn only | sessions, history, storage, the catalogue |
+| knows | the format and its version | the domain, the words, the models |
+| after the turn | nothing — no state survives it | everything worth keeping |
+
+**Zero dependencies is the consequence of that boundary.** The engine is
+embedded into someone else's application, and every dependency here would
+become a dependency of the embedder, with its versions and its conflicts. So
+YAML parsing arrives as a parameter (the `Unmarshal` type), version comparison
+is thirty lines rather than a library, and a guard test — `imports_test.go`,
+test imports included — fails the build the moment production code imports
+anything at all.
 
 ## Status
 
@@ -43,11 +174,11 @@ executes that assistant's whole skill catalogue — around thirty skills, in
 production. It is not a design sketch: every field in the format is there
 because something broke without it, and the comment beside the field says what.
 
-**Library version — `v0.5.x`.** Below `1.0` the **Go API may still move**: a
+**Library version — `v0.8.x`.** Below `1.0` the **Go API may still move**: a
 type can gain a field, a function a parameter. What is already stable is the
 **format** — skill files are versioned separately and on their own rules.
 
-**Format version — `2.2.2`** (`EngineVersion` in `version.go`). A skill declares
+**Format version — `2.2.4`** (`EngineVersion` in `version.go`). A skill declares
 the minimum it needs in `skill_engine_version`, and a foreign MAJOR is refused
 in both directions: a description of a previous major would parse without a
 single complaint, silently losing fields the structs no longer have. What
@@ -60,18 +191,25 @@ file as text, so comments, key order and block scalars survive — but until you
 run it those skills do not execute at all, including on a schedule. Better said
 here than discovered on a Monday morning.
 
-**Tests.** 89.3% statement coverage in the engine, 95.1% in the linter, plus
+**Tests.** 90.1% statement coverage in the engine, 95.2% in the linter, plus
 guard tests for the properties that prose cannot hold: no dependencies, no
 direct reads of the variable map, the two schema translations staying
 structurally identical, and the example applications staying separate modules.
 
-## Why
+## The problem it solves
 
 A restriction written in words is a request: "do NOT call retract without
 confirmation", "run the check EXACTLY once". It is followed exactly as far as
 the model read before it started acting. In steps the same thing is expressed
 structurally: in the unconfirmed branch the `retract` call **is not there**, a
 `call` step cannot be repeated, a branch that does not apply does not run.
+
+The second half of the problem is arithmetic. A turn left to the model is a
+react loop: every decision — which tool, whether that was enough, what next —
+is a generation, and every generation carries the whole context again. Moving
+the decisions the code can make into the code removes those generations
+outright, and the ones that remain are cheaper, because a step declares what it
+is allowed to touch.
 
 ### What it changed, measured on live traffic
 
@@ -158,36 +296,58 @@ across model classes, and the measurement above comes from one installation
 whose models are of one class. It explains those numbers rather than following
 from them.
 
-## What this is not
+## Where it fits
 
-The neighbours are worth naming, because the differences are architectural
-rather than a matter of taste.
+Every neighbour below is better than this engine at the job it was built for.
+The differences are architectural rather than a matter of taste, so they are
+worth naming outright.
 
-**Not a process orchestrator** (Temporal, n8n). The engine owns no state between
-turns, has no storage of its own and does not survive a restart: a turn runs
-inside somebody else's application and ends with it. Comparing durability is
-comparing different jobs — if you need a workflow that resumes after a crash
-three days later, this is the wrong tool and nothing here will make it right.
+| | what it is for, and does better | why this is not that |
+|---|---|---|
+| **LangGraph** and agent frameworks | building an agent — a graph, memory, a model client, an ecosystem, in your application's language | there the graph is **code you deploy**; here the program is **data a skill's author writes**, portable between hosts. Hence a version on the format and `Migrate` for a major |
+| **Temporal** and durable orchestrators | a process that must survive a crash, a deploy and three days of waiting: retries, timers, exactly-once, history | the engine keeps **no state between turns**, has no storage and does not survive a restart. Need durability — take Temporal, and run a turn inside an activity |
+| **n8n**, Airflow | pipelines assembled in a UI or by hand, on a schedule, with hundreds of ready connectors | a turn here **starts from somebody's request** and its shape depends on the words in it. No scheduler, no UI, no server, no connectors |
+| **BPMN** engines | a process a business analyst draws, with events, timers, compensation and a formal semantics behind it | the audience is a **skill's author**, not an analyst; the whole format is one schema file, and there are no events, no timers and no compensation in it |
+| **MCP** | the protocol: how an agent reaches a tool at all | **orthogonal.** MCP says how a call is made, this says **which call happens and when**. The engine calls MCP tools through your `Caller`. What MCP cannot express is "in the unconfirmed branch this call does not exist" |
 
-**Not an agent framework** (LangGraph and its relatives). There the graph is
-written by the application's developer, in the application's language, and it
-ships with the application. Here the steps are written by the SKILL'S author, in
-YAML, and the skill is portable between hosts — which is why the format has a
-version of its own and why `Migrate` exists at all. A skill is data your users
-can write; a graph is code you deploy.
-
-**Zero dependencies is a consequence, not a pose.** An engine embedded into
-someone else's application makes every one of its dependencies theirs, with
-their versions and their conflicts. So YAML arrives as a parameter (the
-`Unmarshal` type), version comparison is thirty lines instead of a library, and
-`imports_test.go` fails the build the moment production code imports anything at
-all. Rare enough to be worth naming where you are comparing.
+Two properties are rare enough to be worth naming where you are comparing:
+the program is **data rather than code**, and the runtime brings **no
+dependencies** into the application that embeds it.
 
 **When you do NOT need this.** One or two steps and no branching — prose is
 cheaper, and the format says so itself (see "A prompt works as well"). The
 engine starts paying where a turn has branches, a loop, a tool set that must
 narrow, or a guard that has to be impossible to violate rather than merely
 asked for.
+
+## Full documentation
+
+Everything above is the whole idea; everything below is **reference** — worth
+reading when you are writing a skill, not before.
+
+| | |
+|---|---|
+| [QUICKSTART.md](QUICKSTART.md) | fifteen minutes, the same skill run as a prompt and as steps |
+| [`examples/skills/`](examples/skills/) | the format itself — thirteen skills, each a commented example |
+| [`examples/`](examples/) | two applications that embed the engine, both runnable offline |
+| [skill.schema.yaml](skill.schema.yaml) | the source of truth for the format (`SchemaRU` is the same in Russian) |
+| [lint/README.md](lint/README.md) | the rule table, and what deliberately stays with the embedder |
+| [CHANGELOG.md](CHANGELOG.md) | what changed in each format version, and what a migration does |
+
+Below, in this file: ["A prompt works as well"](#a-prompt-works-as-well) — the
+two ways to describe a turn and how to switch between them ·
+["Example"](#example), ["Step kinds"](#step-kinds),
+["Branching on the words of a request"](#branching-on-the-words-of-a-request),
+["Shared step settings"](#shared-step-settings),
+["When a step comes back empty"](#when-a-step-comes-back-empty),
+["Variables"](#variables) — the format ·
+["The contract with the application"](#the-contract-with-the-application) — the
+Go API, `Deps`, `Outcome`, versions and migration ·
+["Invariants paid for with live failures"](#invariants-paid-for-with-live-failures)
+and ["Format pitfalls"](#format-pitfalls) — what breaks and why ·
+["The library ships no words"](#the-library-ships-no-words) — the vocabulary you
+declare · ["Checking a skill before it runs"](#checking-a-skill-before-it-runs) —
+the linter.
 
 ## A prompt works as well
 
@@ -551,7 +711,7 @@ those rules skip with a recorded reason rather than passing a skill as clean.
 rep, err := lint.Lint(raw, facts, lint.Options{Unmarshal: yaml.Unmarshal})
 ```
 
-29 rules, every one of them paid for by a broken turn, and every one about a
+30 rules, every one of them paid for by a broken turn, and every one about a
 defect that stays QUIET: a loop collecting into a variable nobody writes gathers
 nothing and reports success, a typo in a variable's name resolves to an empty
 string, a required field the instruction allows to be empty sends the model into

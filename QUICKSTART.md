@@ -265,7 +265,7 @@ if err := skill.Validate(); err != nil { … }
 ```
 
 ```go
-// Will it run WELL? 29 rules for the defects that stay quiet.
+// Will it run WELL? 30 rules for the defects that stay quiet.
 rep, err := lint.Lint(raw, facts, lint.Options{
     Unmarshal:  yaml.Unmarshal,
     EmptyWords: []string{"empty", "пусто"},
@@ -349,4 +349,4 @@ Two working applications to copy from:
 | [`examples/`](examples/) | the format and two applications that embed it |
 | [`skill.schema.yaml`](skill.schema.yaml) | every field, and the failure that paid for it |
 | [CHANGELOG.md](CHANGELOG.md) | what changed in the format, and what a migration does |
-| [`lint/README.md`](lint/README.md) | the 29 rules and what each one catches |
+| [`lint/README.md`](lint/README.md) | the 30 rules and what each one catches |
