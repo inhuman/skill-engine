@@ -855,3 +855,209 @@ func TestRulesSeeInsideEveryNesting(t *testing.T) {
 		})
 	}
 }
+
+// W2 makes TWO checks, and only one of them needs the installation:
+//
+//	the program uses a server the skill did not declare  — the skill alone
+//	a declared server is not registered                  — Facts.ServerNames
+//
+// The second used to switch off the first. The registry was asked for on the
+// first DECLARED server, and a missing one returned out of the whole walk — so
+// in any healthy skill, where a declared server comes first, the loop stopped
+// before reaching the undeclared one below.
+//
+// That is not partial degradation, it is the rule turning itself off. A live
+// catalogue reported "0 errors" while carrying two: steps called a server the
+// skill had not declared, the radius was never handed over, and 21 turns
+// answered "no such pod" about live pods.
+//
+// The ORDER in this fixture is the test: put the undeclared server first and it
+// passes on the broken code too.
+func TestW2FindsUndeclaredServerWithoutRegistry(t *testing.T) {
+	opts := testOptions()
+	rep, err := lint.Lint([]byte(`skill_engine_version: "2.2.0"
+name: probe
+description: d
+trigger_examples: ["p"]
+servers: ["alpha"]
+workflow:
+  tools: ["alpha"]
+  steps:
+    - name: first
+      call: {tool: "alpha:get", args: {}, save_as: a}
+    - name: second
+      call: {tool: "beta:get", args: {}, save_as: b}
+`), lint.Facts{}, opts) // no registry at all
+	require.NoError(t, err)
+
+	f := requireFinding(t, rep, "W2", lint.SeverityError)
+	assert.Contains(t, f.Message, "beta", "the check that needs nothing was switched off by the one that does")
+
+	// And the half that could not run says so: "part of a rule was skipped" and
+	// "the rule did not run" are different facts, and a report has to keep them
+	// apart.
+	assert.Contains(t, strings.Join(rep.Skipped, " "), "W2")
+}
+
+// With a registry both checks run: the undeclared server AND the declared one
+// that does not exist in this installation.
+func TestW2FindsBothKindsWithARegistry(t *testing.T) {
+	facts := lint.Facts{ServerNames: func() []string { return []string{"alpha"} }}
+	rep, err := lint.Lint([]byte(`skill_engine_version: "2.2.0"
+name: probe
+description: d
+trigger_examples: ["p"]
+servers: ["alpha", "ghost"]
+workflow:
+  tools: ["alpha", "ghost"]
+  steps:
+    - name: first
+      call: {tool: "alpha:get", args: {}, save_as: a}
+    - name: second
+      call: {tool: "ghost:get", args: {}, save_as: b}
+    - name: third
+      call: {tool: "beta:get", args: {}, save_as: c}
+`), facts, testOptions())
+	require.NoError(t, err)
+
+	var msgs []string
+	for _, f := range findAll(rep, "W2") {
+		msgs = append(msgs, f.Message)
+	}
+	joined := strings.Join(msgs, " | ")
+	assert.Contains(t, joined, "beta", "the undeclared server was not reported")
+	assert.Contains(t, joined, "ghost", "the declared-but-unregistered server was not reported")
+}
+
+// Without a registry the second check must be ABSENT, not permissive and not
+// noisy. The obvious patch for the halt above — hand the loop an empty registry
+// and carry on — turns every declared server into "not registered", which is
+// worse than the silence it replaces: a report full of findings about servers
+// that exist.
+func TestW2DoesNotInventUnregisteredServers(t *testing.T) {
+	rep, err := lint.Lint([]byte(`skill_engine_version: "2.2.0"
+name: probe
+description: d
+trigger_examples: ["p"]
+servers: ["alpha", "gamma"]
+workflow:
+  tools: ["alpha", "gamma"]
+  steps:
+    - name: first
+      call: {tool: "alpha:get", args: {}, save_as: a}
+    - name: second
+      call: {tool: "gamma:get", args: {}, save_as: b}
+`), lint.Facts{}, testOptions())
+	require.NoError(t, err)
+	requireQuiet(t, rep, "W2")
+}
+
+// A skill whose declared servers are all in use, with no registry, files ONE
+// skip — and a skill that names no server at all files none: a rule with no
+// work does not report that it could not do it.
+func TestW2SkipsOnlyWhenThereIsSomethingToCheck(t *testing.T) {
+	rep, err := lint.Lint([]byte(`skill_engine_version: "2.2.0"
+name: probe
+description: d
+trigger_examples: ["p"]
+workflow:
+  steps:
+    - name: think
+      instruction: do it
+      tools: []
+`), lint.Facts{}, testOptions())
+	require.NoError(t, err)
+	assert.NotContains(t, strings.Join(rep.Skipped, " "), "W2",
+		"W2 filed a skip on a skill that names no server")
+}
+
+// W19: a reference to an asset the skill does not declare.
+//
+// The engine expands an unknown asset to an EMPTY STRING by contract — so that
+// a marker never reaches the model as part of an instruction — and that
+// contract is right. The price is that a typo in the name is indistinguishable
+// from an empty asset, and what fails is not the typo but whatever stood next
+// to it: the call loses a required argument, and the server's error names the
+// argument rather than the substitution a floor above.
+//
+// Both forms matter and both are used: `{{asset:name}}` puts the content in
+// the text for the model, `{from: "asset:name"}` passes it into an argument
+// past the context.
+func TestW19_UndeclaredAssetReference(t *testing.T) {
+	for name, step := range map[string]string{
+		"in an instruction": `    - name: run
+      instruction: "here it is: {{asset:countr}}"
+      tools: []`,
+		"in a call argument": `    - name: run
+      call:
+        tool: "docs:page_get"
+        args: {title: x, code: {from: "asset:countr"}}
+        save_as: out`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			rep := lintSkill(t, wf(`  tools: ["docs"]
+  assets:
+    counter:
+      kind: code
+      source: inline
+      params: {lang: python}
+      content: "print(1)"
+  steps:
+`+step+`
+`))
+			f := requireFinding(t, rep, "W19", lint.SeverityError)
+			assert.Contains(t, f.Message, "countr")
+			assert.Contains(t, f.Message, "counter", "the finding must list what IS declared — a typo is read by comparison")
+		})
+	}
+}
+
+// A skill that declares no assets at all and still references one: the same
+// defect, and the rule must not skip it just because the map is empty.
+func TestW19_ReferenceWithNoAssetsDeclared(t *testing.T) {
+	rep := lintSkill(t, wf(`  steps:
+    - name: run
+      instruction: "here it is: {{asset:missing}}"
+      tools: []
+`))
+	f := requireFinding(t, rep, "W19", lint.SeverityError)
+	assert.Contains(t, f.Message, "missing")
+}
+
+// A correct reference is silence — in both forms, and inside a branch.
+func TestW19_DeclaredAssetIsQuiet(t *testing.T) {
+	rep := lintSkill(t, wf(`  tools: ["docs"]
+  assets:
+    counter: {kind: code, source: inline, params: {lang: python}, content: "print(1)"}
+    notes: {kind: text, source: inline, content: "a note"}
+  steps:
+    - name: think
+      instruction: "read {{asset:notes}}"
+      tools: []
+      save_as: mode
+    - if:
+        cond: "mode == go"
+        then:
+          - name: run
+            call:
+              tool: "docs:page_get"
+              args: {title: x, code: {from: "asset:counter"}}
+              save_as: out
+`))
+	requireQuiet(t, rep, "W19")
+	requireQuiet(t, rep, "W20")
+}
+
+// W20: an asset declared and never used. Milder — clutter rather than a
+// failure — and worth having because assets outlive the steps that used them.
+func TestW20_UnusedAsset(t *testing.T) {
+	rep := lintSkill(t, wf(`  assets:
+    leftover: {kind: text, source: inline, content: "nobody reads this"}
+  steps:
+    - name: think
+      instruction: do it
+      tools: []
+`))
+	f := requireFinding(t, rep, "W20", lint.SeverityWarn)
+	assert.Contains(t, f.Message, "leftover")
+}

@@ -53,9 +53,25 @@ func (r *run) workflowRules(s *skillengine.Skill) {
 // The skill's `servers` is the ceiling of the radius; a step can only narrow
 // it. A server named in the program but not in `servers` will not appear at the
 // executor out of nowhere.
+//
+// TWO checks, and only the second needs the installation:
+//
+//	the program uses a server the skill did not declare  — the skill alone
+//	a declared server is not registered                  — Facts.ServerNames
+//
+// They are two passes for that reason. Interleaved, they were asked for the
+// registry on the first DECLARED server, and a missing one abandoned the whole
+// walk — so in any healthy skill, where a declared server comes first, the loop
+// stopped before reaching the undeclared one below. A rule that switches itself
+// off, rather than degrading: a live catalogue reported "0 errors" while
+// carrying two, and 21 turns answered "no such pod" about live pods because a
+// step called a server its skill never declared.
 func (r *run) workflowServers(s *skillengine.Skill, flow *skillengine.Flow) {
 	declared := set(s.Servers)
-	var known map[string]bool
+
+	// Pass 1 — the skill against itself. Nothing outside is needed, so nothing
+	// outside can prevent it.
+	var used []string
 	seen := map[string]bool{}
 	for _, srv := range workflowServerNames(flow) {
 		// A computed name is not static: what it resolves to is checked at
@@ -75,12 +91,20 @@ func (r *run) workflowServers(s *skillengine.Skill, flow *skillengine.Flow) {
 				"the step will not be handed it (servers is the ceiling of the radius, a step can only narrow it)", srv)
 			continue
 		}
-		if known == nil {
-			var ok bool
-			if known, ok = r.servers("W2"); !ok {
-				return
-			}
-		}
+		used = append(used, srv)
+	}
+
+	// Pass 2 — the skill against the installation. Asked for only when there is
+	// something to ask about, so a skill with no declared servers in use does
+	// not file a skip about a check that had no work.
+	if len(used) == 0 {
+		return
+	}
+	known, ok := r.servers("W2")
+	if !ok {
+		return
+	}
+	for _, srv := range used {
 		if !known[srv] {
 			r.add("W2", SeverityError, "server `%s` is not registered. Available: %s",
 				srv, strings.Join(sortedKeys(known), ", "))
@@ -135,11 +159,12 @@ func (r *run) workflowTools(flow *skillengine.Flow) {
 // instruction burns context and invites the model to rewrite it, while
 // reference material passed by reference never reaches the model at all.
 func (r *run) workflowAssets(flow *skillengine.Flow) {
+	inText, byRef := assetUsage(flow)
+	r.assetRefsResolve(flow, inText, byRef)
 	if len(flow.Assets) == 0 {
 		return
 	}
 	v := r.opts.Assets
-	inText, byRef := assetUsage(flow)
 	for _, name := range sortedKeys(flow.Assets) {
 		a := flow.Assets[name]
 		r.assetParams(name, a)
@@ -157,6 +182,59 @@ func (r *run) workflowAssets(flow *skillengine.Flow) {
 			r.add("W4", SeverityWarn, "asset `%s` is reference material, and it is only passed by reference "+
 				"({from: asset:%s}): the model never sees it. If it is knowledge to reason with, substitute "+
 				"it: {{asset:%s}}", name, name, name)
+		}
+	}
+}
+
+// W19 — every asset a step references is declared, and W20 — every asset
+// declared is referenced.
+//
+// The engine expands an unknown asset to an EMPTY STRING, deliberately: a
+// marker left in an instruction would be read by the model as part of it. That
+// contract is right, and it has a price nobody was paying — a typo in the name
+// is indistinguishable from an empty asset, and what fails is not the typo but
+// whatever stood next to it. A call whose argument came from the missing asset
+// is rejected by the server for a MISSING ARGUMENT, and the error names the
+// argument rather than the substitution a floor above.
+//
+// Both reference forms are checked because both are used: `{{asset:name}}` puts
+// the content into the text for the model, `{from: "asset:name"}` passes it
+// into an argument past the context.
+//
+// The unused half is a warning, not an error: an asset nobody reads costs
+// nothing at run time. It is worth saying because assets outlive the steps that
+// used them — a step is rewritten, the payload it carried stays behind.
+//
+// Purely static, both of them: the declarations and the references are in one
+// document, and no registry of anything is involved.
+func (r *run) assetRefsResolve(flow *skillengine.Flow, inText, byRef map[string]bool) {
+	used := map[string]bool{}
+	for _, set := range []map[string]bool{inText, byRef} {
+		for name := range set {
+			used[name] = true
+		}
+	}
+
+	for _, name := range sortedKeys(used) {
+		if _, ok := flow.Assets[name]; ok {
+			continue
+		}
+		// The declared names go into the finding: a typo is recognised by
+		// comparison, and "countr is not declared" next to "counter" answers
+		// itself.
+		declared := "the skill declares none"
+		if len(flow.Assets) > 0 {
+			declared = "declared: " + strings.Join(sortedKeys(flow.Assets), ", ")
+		}
+		r.add("W19", SeverityError, "a step references asset `%s`, which is not declared — the engine expands "+
+			"an unknown asset to an EMPTY STRING, so the failure surfaces wherever that emptiness lands "+
+			"(a call losing a required argument, say), never here. %s", name, declared)
+	}
+
+	for _, name := range sortedKeys(flow.Assets) {
+		if !used[name] {
+			r.add("W20", SeverityWarn, "asset `%s` is declared and never referenced — nothing resolves it, "+
+				"and it will outlive whatever step used to", name)
 		}
 	}
 }

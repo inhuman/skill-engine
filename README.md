@@ -551,7 +551,7 @@ those rules skip with a recorded reason rather than passing a skill as clean.
 rep, err := lint.Lint(raw, facts, lint.Options{Unmarshal: yaml.Unmarshal})
 ```
 
-27 rules, every one of them paid for by a broken turn, and every one about a
+29 rules, every one of them paid for by a broken turn, and every one about a
 defect that stays QUIET: a loop collecting into a variable nobody writes gathers
 nothing and reports success, a typo in a variable's name resolves to an empty
 string, a required field the instruction allows to be empty sends the model into
