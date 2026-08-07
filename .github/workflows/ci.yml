@@ -44,3 +44,14 @@ jobs:
             go vet -C "$dir" ./...
             go test -C "$dir" ./... -count=1
           done
+
+      # The four architecture pictures are generated, and readme_test.go only
+      # compares them WITH EACH OTHER — four files edited by hand in the same
+      # wrong way would still agree. This is the other half: regenerate them and
+      # fail if anything moved, which is what catches an SVG edited directly and
+      # a generator whose output nobody re-ran.
+      - name: Diagrams
+        run: |
+          python3 assets/architecture.py
+          git diff --exit-code --stat assets/ \
+            || { echo "::error::assets/ is out of date — run python3 assets/architecture.py and commit the result"; exit 1; }
