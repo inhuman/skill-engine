@@ -56,18 +56,55 @@ func sectionsOf(doc string) []string {
 	return out
 }
 
-// localLinks — markdown links pointing inside the repository, badges and
-// external URLs excluded.
+// localLinks — everything the file points at inside the repository, badges and
+// external URLs excluded. Markdown links, and the `src`/`srcset` of the
+// <picture> the architecture diagram is shown through: a theme-specific image
+// is HTML rather than markdown, and a missing one shows as a broken icon to
+// exactly half the readers — the half whose theme nobody tested in.
 var linkRe = regexp.MustCompile(`\]\(([^)]+)\)`)
+var imgRe = regexp.MustCompile(`(?:src|srcset)="([^"]+)"`)
 
 func localLinks(doc string) []string {
 	var out []string
-	for _, m := range linkRe.FindAllStringSubmatch(doc, -1) {
-		target := m[1]
-		if strings.HasPrefix(target, "http") || strings.HasPrefix(target, "#") {
-			continue
+	for _, re := range []*regexp.Regexp{linkRe, imgRe} {
+		for _, m := range re.FindAllStringSubmatch(doc, -1) {
+			target := m[1]
+			if strings.HasPrefix(target, "http") || strings.HasPrefix(target, "#") {
+				continue
+			}
+			out = append(out, strings.TrimSuffix(target, "/"))
 		}
-		out = append(out, strings.TrimSuffix(target, "/"))
 	}
 	return out
+}
+
+// The architecture diagram is four files — two languages times two themes — and
+// they are one picture. Hand-editing one of them is how a reader in dark mode
+// ends up looking at a version of the engine that no longer exists, silently:
+// nothing breaks, the picture just stops being true.
+//
+// So the pairs are compared by SHAPE. Across themes, everything but the palette
+// must be identical; across languages, the number of boxes, lines and captions
+// must be — the words differ, the drawing does not.
+func TestArchitectureDiagramsStayInStep(t *testing.T) {
+	colours := regexp.MustCompile(`(fill|stroke|stop-color)="[^"]*"`)
+	for _, pair := range [][2]string{
+		{"assets/architecture.light.svg", "assets/architecture.dark.svg"},
+		{"assets/architecture.ru.light.svg", "assets/architecture.ru.dark.svg"},
+	} {
+		light := colours.ReplaceAllString(string(mustRead(t, pair[0])), `$1="…"`)
+		dark := colours.ReplaceAllString(string(mustRead(t, pair[1])), `$1="…"`)
+		assert.Equalf(t, light, dark,
+			"%s and %s differ in more than their colours — one theme is drawing something the other does not",
+			pair[0], pair[1])
+	}
+
+	for _, theme := range []string{"light", "dark"} {
+		en := string(mustRead(t, "assets/architecture."+theme+".svg"))
+		ru := string(mustRead(t, "assets/architecture.ru."+theme+".svg"))
+		for _, tag := range []string{"<rect", "<text", "<path"} {
+			assert.Equalf(t, strings.Count(en, tag), strings.Count(ru, tag),
+				"the %s diagrams disagree on how many %s elements the picture has", theme, tag)
+		}
+	}
 }

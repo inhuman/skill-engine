@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 570" width="900" height="570" role="img" aria-label="skill-engine architecture">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" fill="#9198a1"/></marker></defs>
+<rect x="24" y="24" width="852" height="522" rx="16" fill="none" stroke="#d1d9e0" stroke-width="1.5" stroke-dasharray="7 6"/>
+<text x="46" y="51" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#59636e" text-anchor="start" letter-spacing="0.4">your application</text>
+<rect x="60" y="68" width="130" height="42" rx="9" fill="#ffffff" stroke="#d1d9e0" stroke-width="1.5"/>
+<text x="125" y="94" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="400" fill="#1f2328" text-anchor="middle">skill.yaml</text>
+<path d="M196,89 L274,89" fill="none" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="235" y="82" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#59636e" text-anchor="middle">ParseSkill</text>
+<rect x="280" y="68" width="100" height="42" rx="9" fill="#ffffff" stroke="#d1d9e0" stroke-width="1.5"/>
+<text x="330" y="94" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="400" fill="#1f2328" text-anchor="middle">Skill</text>
+<path d="M386,89 L424,89" fill="none" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="430" y="68" width="330" height="42" rx="9" fill="#ffffff" stroke="#d1d9e0" stroke-width="1.5"/>
+<text x="595" y="94" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="400" fill="#1f2328" text-anchor="middle">ExecuteWith(ctx, flow, Deps, vars)</text>
+<path d="M595,116 L595,146" fill="none" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="60" y="152" width="780" height="126" rx="14" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
+<text x="84" y="184" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="600" fill="#3730a3" text-anchor="start">skill-engine</text>
+<rect x="712" y="164" width="104" height="24" rx="12" fill="#e0e7ff" stroke="#6366f1" stroke-width="1"/>
+<text x="764" y="180" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#3730a3" text-anchor="middle">stdlib only</text>
+<text x="450" y="222" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#1f2328" text-anchor="middle">order of steps · branches · loops · parallel · delegation</text>
+<text x="450" y="248" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#1f2328" text-anchor="middle">variables · tool radius · empty &amp; error policy · versioning</text>
+<path d="M136,284 L136,312" fill="none" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="60" y="316" width="152" height="78" rx="10" fill="#ffffff" stroke="#d1d9e0" stroke-width="1.5"/>
+<text x="136" y="344" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="400" fill="#0550ae" text-anchor="middle">Runner</text>
+<text x="136" y="366" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#59636e" text-anchor="middle">your LLM client</text>
+<path d="M293,284 L293,312" fill="none" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="217" y="316" width="152" height="78" rx="10" fill="#ffffff" stroke="#d1d9e0" stroke-width="1.5"/>
+<text x="293" y="344" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="400" fill="#0550ae" text-anchor="middle">Caller</text>
+<text x="293" y="366" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#59636e" text-anchor="middle">your tools</text>
+<text x="293" y="383" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#59636e" text-anchor="middle">(MCP, HTTP)</text>
+<path d="M450,284 L450,312" fill="none" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="374" y="316" width="152" height="78" rx="10" fill="#ffffff" stroke="#d1d9e0" stroke-width="1.5"/>
+<text x="450" y="344" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="400" fill="#0550ae" text-anchor="middle">Delegate</text>
+<text x="450" y="366" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#59636e" text-anchor="middle">your skill</text>
+<text x="450" y="383" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#59636e" text-anchor="middle">catalogue</text>
+<path d="M607,284 L607,312" fill="none" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="531" y="316" width="152" height="78" rx="10" fill="#ffffff" stroke="#d1d9e0" stroke-width="1.5"/>
+<text x="607" y="344" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="400" fill="#0550ae" text-anchor="middle">Assets</text>
+<text x="607" y="366" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#59636e" text-anchor="middle">your files</text>
+<path d="M764,284 L764,312" fill="none" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="688" y="316" width="152" height="78" rx="10" fill="#ffffff" stroke="#d1d9e0" stroke-width="1.5"/>
+<text x="764" y="344" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="400" fill="#0550ae" text-anchor="middle">Memory</text>
+<text x="764" y="366" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#59636e" text-anchor="middle">your store</text>
+<rect x="60" y="436" width="780" height="76" rx="12" fill="none" stroke="#d1d9e0" stroke-width="1.5" stroke-dasharray="6 5"/>
+<text x="450" y="467" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#1f2328" text-anchor="middle">vars — what the steps produced   ·   Outcome — a trace of every step</text>
+<text x="450" y="491" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#59636e" text-anchor="middle">OnStepStart / OnStep — events as they happen, for telemetry and UI</text>
+<path d="M60,215 L42,215 L42,474 L54,474" fill="none" stroke="#9198a1" stroke-width="1.5" marker-end="url(#a)"/>
+</svg>
