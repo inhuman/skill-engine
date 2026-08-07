@@ -132,25 +132,13 @@ that names nothing the prose half answers anyway
 
 ## Architecture
 
-```
- ┌── your application ──────────────────────────────────────────────────────┐
- │                                                                          │
- │  skill.yaml ──ParseSkill──▶ Skill ──▶ ExecuteWith(ctx, flow, Deps, vars)  │
- │                                                    │                     │
- │      ┌─────────────────────────────────────────────▼───────────────────┐ │
- │      │ skill-engine                                       stdlib only  │ │
- │      │   order of steps · branches · loops · parallel · delegation     │ │
- │      │   variables · tool radius · empty/error policy · versioning     │ │
- │      └───┬──────────┬───────────┬────────────┬───────────┬─────────────┘ │
- │          │ Runner   │ Caller    │ Delegate   │ Assets    │ Memory        │
- │          ▼          ▼           ▼            ▼           ▼               │
- │      your LLM    your tools   your skill   your files  your store        │
- │      client      (MCP, HTTP)  catalogue                                  │
- │                                                                          │
- │  ◀── vars (what the steps produced) + Outcome (a trace of every step)     │
- │  ◀── OnStepStart / OnStep — events as they happen, for telemetry and UI   │
- └──────────────────────────────────────────────────────────────────────────┘
-```
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/architecture.dark.svg">
+    <img src="assets/architecture.light.svg" width="100%"
+         alt="The application parses a skill and calls ExecuteWith. The engine owns the order of steps, branches, loops, variables, the tool radius and the empty/error policy, on the standard library alone. Runner, Caller, Delegate, Assets and Memory reach back out into the application — the LLM client, the tools, the skill catalogue, the files, the store. Back come the variables the steps produced, an Outcome tracing every step, and OnStepStart / OnStep events as they happen.">
+  </picture>
+</p>
 
 | | the engine | the application |
 |---|---|---|
