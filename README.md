@@ -22,7 +22,7 @@ go get github.com/inhuman/skill-engine
 | | |
 |---|---|
 | **What it is** | a Go library, ≈8 800 lines, **zero dependencies** — the standard library alone |
-| **Where it runs** | a production assistant it was extracted from, ~30 skills in its catalogue |
+| **Where it runs** | written for a home agent on a single 8 GB GPU; since adopted by an assistant in production, ~30 skills in its catalogue |
 | **What it changed** | 23 skills over 5 280 live turns: **20 cheaper, 1 more expensive, 2 unchanged** in LLM generations per turn ([how it was measured](#the-problem-it-solves)) |
 | **What it is not** | not durable, not scheduled, not an agent framework — a turn runs inside your application and ends with it ([the neighbours](#where-it-fits)) |
 
@@ -157,10 +157,17 @@ anything at all.
 
 ## Status
 
-**Where it runs.** The engine was taken out of a working assistant, where it
-executes that assistant's whole skill catalogue — around thirty skills, in
-production. It is not a design sketch: every field in the format is there
-because something broke without it, and the comment beside the field says what.
+**Where it comes from.** It was written for a home agent running on one 8 GB
+GPU, where a generation costs minutes you sit through and the token budget is
+the card rather than an invoice. That is the constraint that shaped the format:
+a turn that used to be one long prompt became steps, and the steps that need no
+model do not pay for one.
+
+**Where it runs now.** It has since been adopted by an assistant in production,
+where it executes the whole skill catalogue — around thirty skills — and where
+the measurement below comes from. So it is not a design sketch: every field in
+the format is there because something broke without it, and the comment beside
+the field says what.
 
 **Library version — `v0.8.x`.** Below `1.0` the **Go API may still move**: a
 type can gain a field, a function a parameter. What is already stable is the
