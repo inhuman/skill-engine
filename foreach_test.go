@@ -53,6 +53,28 @@ steps:
 	assert.Equal(t, "item a\n\nitem b", vars["acc"])
 }
 
+// An array of OBJECTS is the natural output of a step with a response_schema,
+// and the body must be able to reach into one. Rendered with fmt.Sprint the
+// element arrived as Go's map formatting — `map[name:api restartCount:12]` —
+// so every field lookup resolved to emptiness and the model was shown a syntax
+// belonging to the language the engine happens to be written in.
+func TestForEachOverJSONObjectsKeepsTheFields(t *testing.T) {
+	f := parseFlow(t, `
+steps:
+  - for_each:
+      in: pods
+      as: pod
+      collect: acc
+      steps:
+        - set: {var: acc, value: "{{pod.name}}: {{pod.restartCount}}"}
+`)
+	vars, _, err := ExecuteWith(context.Background(), f, Deps{}, map[string]string{
+		"pods": `[{"name":"api","restartCount":12},{"name":"web","restartCount":1}]`,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "api: 12\n\nweb: 1", vars["acc"])
+}
+
 // The ceiling is required in spirit: a loop over a collection of unknown length
 // is a straight road to a runaway. Partial processing is SAID OUT LOUD rather
 // than swallowed.

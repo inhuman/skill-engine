@@ -525,12 +525,32 @@ func splitCollection(v string) []string {
 		if err := json.Unmarshal([]byte(v), &arr); err == nil {
 			out := make([]string, 0, len(arr))
 			for _, e := range arr {
-				out = append(out, fmt.Sprint(e))
+				out = append(out, itemText(e))
 			}
 			return out
 		}
 	}
 	return nonEmpty(strings.Split(v, "\n"))
+}
+
+// itemText — one element of a collection as the loop's body will see it.
+//
+// A string is itself; everything else goes back to JSON. Not fmt.Sprint: an
+// array of OBJECTS — the natural output of a step with a response_schema — came
+// out as Go's map formatting (`map[name:api restartCount:12]`), and the whole
+// object went with it. Field access (`{{pod.name}}`, a condition on
+// `pod.restartCount`) has nothing to parse and resolves to emptiness, while the
+// model is shown a syntax belonging to the language the engine happens to be
+// written in.
+func itemText(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprint(v)
+	}
+	return string(b)
 }
 
 func nonEmpty(in []string) []string {
