@@ -114,15 +114,16 @@ func refsOfStep(s *skillengine.Step) []varRef {
 	if s.ForEach != nil {
 		bare = append(bare, s.ForEach.In)
 	}
-	// The engine is asked which variable a condition depends on: its grammar
-	// has a NAME on the left and a literal on the right, and a second parser of
-	// it here would report the value as a missing variable.
+	// The engine is asked which variables a condition depends on: its grammar
+	// has a NAME on the left and, depending on the form, a literal or a second
+	// NAME on the right (`stale > req.threshold`). A parser of it here would
+	// report a literal as a missing variable, or miss a threshold that is one.
 	for _, cond := range []string{s.When, condOf(s.If)} {
 		if cond == "" {
 			continue
 		}
-		if name, ok := skillengine.CondVar(cond); ok {
-			bare = append(bare, name)
+		if names, ok := skillengine.CondVars(cond); ok {
+			bare = append(bare, names...)
 		}
 	}
 	if s.Switch != nil && !strings.Contains(s.Switch.Var, "{{") {

@@ -21,6 +21,80 @@ wrap skills in something of your own — front matter, a markdown body, several
 documents in one file — unwrap before calling and wrap the result back;
 anything else is refused rather than guessed at.
 
+## 2.3.0
+
+Four new condition forms. A skill that does not use them behaves exactly as it
+did, so nothing needs migrating; a skill that uses one must declare
+`skill_engine_version: 2.3.0`, which is what stops an older engine from reading
+it and refusing a condition it cannot parse.
+
+- **Added**: `var > 5`, `var >= other.var`, `var < 0.5`, `var <= days` alongside
+  `==`, `!=`, `is [not] empty` and `contains`. The right side may be a number or
+  the NAME of a variable holding one — a threshold is rarely a constant, it
+  arrives from the step that parsed the request.
+
+  Why. Numbers were in the flow all along — counters, ids, thresholds — and the
+  only thing expressible about one was equality with a literal, which is why a
+  live catalogue spells "no pipeline found" as `ci.id == 0`. Everything else
+  went one of two ways: into the TEXT of a step, where a deterministic rule ends
+  up applied by a model («порог простоя больше нуля — оставь только те, что не
+  двигались дольше него»), or into an asset — a network call to compare two
+  numbers.
+
+  The refusal was not hypothetical. On the first day skills were being written
+  by a model rather than by hand, it wrote `{{pod.restartCount}} > 5`, got a
+  parse error, and wrote the same form again in another step of the same
+  session. Both attempts were a condition in the body of a `for_each`: "keep the
+  ones over the threshold" is written as a loop with a branch inside, which is
+  why this closes the case and no collection filter is added.
+
+  Both ways of not being a number are LOUD — an error that stops the turn, not a
+  `false` that quietly takes the other branch:
+
+  - a value that does not parse as a number names itself in the error;
+  - an empty or failed variable is **not zero**. Reading it as 0 makes "the step
+    returned nothing" indistinguishable from "the number is small" — the same
+    failure `is empty` exists to prevent. Where emptiness is legal, the author
+    writes `var is not empty` in front.
+
+  A condition is the one place where a wrong answer leaves no trace:
+  `restarts > 5` looks right whatever it returns, which is the class the
+  linter's W14 was written for.
+
+  Two integers are compared as integers, so a nineteen-digit id does not lose
+  its last digits to float64. `NaN`, `Inf` and hex floats are not numbers here:
+  a variable holding one would compare false against every threshold and look
+  like a number that is merely small.
+
+  **`==` is unchanged and still textual.** `"5" == "5.0"` stays false: the
+  equalities in existing skills compare ids and sentinels, and coercion would
+  quietly change what they mean.
+
+  There is deliberately no arithmetic (`a + b > c`, `len(x) > 0`): those are
+  expressions, and expressions are the door to skills that cannot be read from
+  top to bottom.
+
+- **Changed**: a condition written with braces — `{{pod.restartCount}} > 5`, the
+  form a model reaches for, since that is how substitution is written everywhere
+  except conditions and `for_each.in` — is still refused, but the error now
+  names the braces and prints the condition without them. Before, the author got
+  a list of the allowed shapes and had to spot that their string differs from
+  one of them by exactly two pairs of brackets.
+
+- **Fixed**: a `for_each` over a JSON array of OBJECTS handed its body Go's map
+  formatting (`map[name:api restartCount:12]`) instead of the object. Every
+  field lookup inside the loop — `{{pod.name}}`, a condition on
+  `pod.restartCount` — resolved to emptiness, and the model was shown a syntax
+  belonging to the language the engine happens to be written in. Elements are
+  now re-rendered as JSON; a string element is unchanged.
+
+- **Changed (Go API)**: `CondVar` became `CondVars`, returning every variable a
+  condition depends on rather than only the left one. A numeric comparison may
+  name a variable on both sides, and a reader that saw only the left would leave
+  a typo in a threshold unchecked — which is exactly what such a reader is
+  usually looking for. Callers replace `name, ok := CondVar(c)` with
+  `names, ok := CondVars(c)`.
+
 ## 2.2.4
 
 Engine fixes; the format itself did not change. One of them **changes

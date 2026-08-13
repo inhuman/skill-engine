@@ -931,9 +931,40 @@ $defs:
             var is not empty
             var contains a | b  — the value NAMES any one of these words
             var not contains a | b
+            var > 5             — also >=, < and <=; the right side may be a
+            var >= other.var      number or the name of a variable holding one
+          A variable is named WITHOUT {{ }} here — the braces belong to
+          substitution, and a condition takes the name itself.
+
           `is empty` exists because to a "nothing found, try another way" branch
           emptiness and a failure mean the same thing, even though to the policy
           they do not.
+
+          The numeric comparisons (format 2.3.0) exist because numbers were in
+          the flow all along — counters, ids, thresholds parsed out of a request
+          — and the only thing expressible about one was equality with a
+          literal. Everything else went into the TEXT of a step, where a
+          deterministic rule ends up applied by a model, or into an asset: a
+          network call to compare two numbers.
+
+          Their rules, both of them there to keep a wrong branch from being
+          invisible:
+            - an operand that is not a number STOPS the turn. It does not
+              quietly evaluate to false: `restarts > 5` looks right whatever it
+              answers;
+            - an empty (or failed) variable is NOT zero, and stops the turn for
+              the same reason: reading it as 0 makes "the step returned nothing"
+              indistinguishable from "the number is small". Where emptiness is
+              legal, say so with `var is not empty` in front.
+
+          Two integers are compared as integers, so a long id does not lose its
+          last digits to float64. `==` stays TEXTUAL — `"5" == "5.0"` is false,
+          and equalities in existing skills compare ids and sentinels.
+
+          There is deliberately no arithmetic (`a + b > c`, `len(x) > 0`): those
+          are expressions, and expressions are the door to skills that cannot be
+          read from top to bottom. Picking the items of a collection over a
+          threshold is a `for_each` with a condition in its body.
 
           `contains` (format 2.2.0) exists because a step whose whole job is
           "which of these words did the request use" already carries the mapping

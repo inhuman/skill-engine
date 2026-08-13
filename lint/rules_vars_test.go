@@ -63,6 +63,44 @@ func TestW14_ForwardReference(t *testing.T) {
 	requireFinding(t, rep, "W14", lint.SeverityError)
 }
 
+// A numeric comparison names a variable on BOTH sides, and a typo in the
+// THRESHOLD is the same silence as a typo in the value: the condition looks
+// right, and the branch it guards never fires the way it reads.
+func TestW14_TypoInAThreshold(t *testing.T) {
+	rep := lintSkill(t, wf(`  tools: ["docs"]
+  vars:
+    stale_days: "7"
+  steps:
+    - name: count
+      instruction: count them
+      tools: []
+      save_as: idle
+    - name: report
+      when: "idle > stale_dys"
+      instruction: report it
+      tools: []
+`))
+	f := requireFinding(t, rep, "W14", lint.SeverityError)
+	assert.Contains(t, f.Message, "stale_dys")
+}
+
+// A literal threshold is a number, not a name — reporting it as a missing
+// variable would fire on every numeric condition ever written.
+func TestW14_ALiteralThresholdIsNotAVariable(t *testing.T) {
+	rep := lintSkill(t, wf(`  tools: ["docs"]
+  steps:
+    - name: count
+      instruction: count them
+      tools: []
+      save_as: idle
+    - name: report
+      when: "idle >= 7"
+      instruction: report it
+      tools: []
+`))
+	requireQuiet(t, rep, "W14")
+}
+
 // Legitimate names stay quiet: the host's own variables, an object's field, the
 // engine's suffixes, a loop's item inside its own loop, variables from branches.
 func TestW14_LegitimateReferencesAreQuiet(t *testing.T) {

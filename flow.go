@@ -326,7 +326,8 @@ type Switch struct {
 	Default []Step            `yaml:"default,omitempty"`
 }
 
-// If — branching on a condition of the form "var == value" / "var != value".
+// If — branching on a condition: "var == value", "var is [not] empty",
+// "var contains a | b", "var > 5" (see cond.go for the whole grammar).
 type If struct {
 	Cond string `yaml:"cond"`
 	Then []Step `yaml:"then"`
