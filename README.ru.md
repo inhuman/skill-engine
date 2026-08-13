@@ -471,8 +471,6 @@ steps:
           cond: "pod.restartCount > req.threshold"
           then:
             - set: {var: hot, value: "{{pod.name}}"}
-          else:
-            - set: {var: hot, value: ""}
 ```
 
 Это та форма, в которой случай и приходит: «оставить те, что выше порога» пишут

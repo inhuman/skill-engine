@@ -492,8 +492,6 @@ threshold usually arrives from the step that parsed the request:
           cond: "pod.restartCount > req.threshold"
           then:
             - set: {var: hot, value: "{{pod.name}}"}
-          else:
-            - set: {var: hot, value: ""}
 ```
 
 That is the shape the case arrives in: "keep the ones over the threshold" gets

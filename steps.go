@@ -456,6 +456,20 @@ func (s *state) forEachStep(ctx context.Context, step Step) (bool, error) {
 	failed := 0
 	for _, item := range items {
 		s.set(fe.As, item)
+		// Emptied BEFORE the body, so that what is collected is what THIS
+		// iteration produced. The value used to be read after the body without
+		// ever being cleared, and an iteration that wrote nothing — the branch
+		// inside it did not fire — contributed whatever the previous iteration
+		// had left there. A loop that picks three of five items out of a list
+		// returned five, with two of them duplicates, and the duplicates look
+		// exactly like honest results.
+		//
+		// It also fixes a stale read the other way round: a later step in the
+		// same body reading the collect variable used to see the PREVIOUS
+		// iteration's value where this one had written none.
+		if fe.Collect != "" {
+			s.set(fe.Collect, "")
+		}
 		if _, err := s.run(ctx, fe.Steps); err != nil {
 			if errors.Is(err, ErrExit) {
 				return false, err

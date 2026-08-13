@@ -81,6 +81,24 @@ it and refusing a condition it cannot parse.
   a list of the allowed shapes and had to spot that their string differs from
   one of them by exactly two pairs of brackets.
 
+- **Fixed, and a behaviour change**: `for_each` with `collect` gathered a
+  duplicate wherever an iteration produced nothing. The variable was read after
+  every iteration and never cleared, so an iteration whose branch did not fire
+  contributed whatever the previous one had left — a loop picking two items out
+  of three returned three, and the extra one looks exactly like an honest
+  result. It is now emptied before each iteration.
+
+  The same clearing fixes a stale read the other way round: a step further down
+  the body used to see the PREVIOUS iteration's value wherever this one had
+  written none.
+
+  **If a skill of yours works around this** — an `else` branch assigning an
+  empty value purely to keep the collection clean — that branch is now
+  unnecessary, though harmless. Nothing else changes: two iterations that
+  genuinely produce the same answer are still two results, and an accumulator
+  built by reading the collect variable inside the loop never worked (it
+  gathered its own growing prefix).
+
 - **Fixed**: a `for_each` over a JSON array of OBJECTS handed its body Go's map
   formatting (`map[name:api restartCount:12]`) instead of the object. Every
   field lookup inside the loop — `{{pod.name}}`, a condition on

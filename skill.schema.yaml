@@ -819,6 +819,12 @@ $defs:
           The variable the iterations' results are gathered into (strings
           separated by a line break). Unset — the results stay inside the
           iteration only.
+
+          It is emptied before each iteration, so what is gathered is what THAT
+          iteration produced: an iteration whose branch did not fire contributes
+          nothing, rather than repeating whatever the previous one left behind.
+          Two iterations that genuinely produce the same answer are still two
+          results — this is not deduplication.
       max_iterations:
         type: integer
         minimum: 1

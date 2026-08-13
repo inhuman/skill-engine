@@ -199,10 +199,6 @@ steps:
 // "keep the ones over the threshold" is written as a loop with a branch, which
 // is why a loop plus a comparison covers it and a collection filter is not
 // needed.
-//
-// The `else` writing an empty value is not decoration: `collect` takes the
-// variable after EVERY iteration, so an iteration that writes nothing
-// contributes whatever the previous one left there.
 func TestNumericConditionPicksItemsOverAThreshold(t *testing.T) {
 	f := parseFlow(t, `
 steps:
@@ -217,8 +213,6 @@ steps:
             cond: "pod.restartCount > 5"
             then:
               - set: {var: hot, value: "{{pod.name}}"}
-            else:
-              - set: {var: hot, value: ""}
 `)
 	require.NoError(t, f.Validate())
 	vars, _, err := ExecuteWith(context.Background(), f, Deps{}, map[string]string{
