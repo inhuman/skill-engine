@@ -53,6 +53,97 @@ steps:
 	assert.Equal(t, "item a\n\nitem b", vars["acc"])
 }
 
+// An array of OBJECTS is the natural output of a step with a response_schema,
+// and the body must be able to reach into one. Rendered with fmt.Sprint the
+// element arrived as Go's map formatting — `map[name:api restartCount:12]` —
+// so every field lookup resolved to emptiness and the model was shown a syntax
+// belonging to the language the engine happens to be written in.
+func TestForEachOverJSONObjectsKeepsTheFields(t *testing.T) {
+	f := parseFlow(t, `
+steps:
+  - for_each:
+      in: pods
+      as: pod
+      collect: acc
+      steps:
+        - set: {var: acc, value: "{{pod.name}}: {{pod.restartCount}}"}
+`)
+	vars, _, err := ExecuteWith(context.Background(), f, Deps{}, map[string]string{
+		"pods": `[{"name":"api","restartCount":12},{"name":"web","restartCount":1}]`,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "api: 12\n\nweb: 1", vars["acc"])
+}
+
+// What `collect` gathers is what THIS iteration produced. The value used to be
+// read after the body without ever being cleared, so an iteration whose branch
+// did not fire contributed whatever the previous one had left: a loop picking
+// two items out of three returned three, one of them a duplicate — and a
+// duplicate looks exactly like an honest result.
+func TestForEachCollectsOnlyWhatAnIterationProduced(t *testing.T) {
+	f := parseFlow(t, `
+steps:
+  - for_each:
+      in: pods
+      as: pod
+      collect: hot
+      steps:
+        - if:
+            cond: "pod.restartCount > 5"
+            then:
+              - set: {var: hot, value: "{{pod.name}}"}
+`)
+	vars, _, err := ExecuteWith(context.Background(), f, Deps{}, map[string]string{
+		"pods": `[{"name":"api","restartCount":12},{"name":"web","restartCount":1},{"name":"db","restartCount":6}]`,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "api\n\ndb", vars["hot"])
+}
+
+// Two iterations that genuinely produce the same answer are two results, not
+// one: clearing the variable is not deduplication.
+func TestForEachKeepsRepeatedResults(t *testing.T) {
+	f := parseFlow(t, `
+steps:
+  - for_each:
+      in: items
+      as: it
+      collect: acc
+      steps:
+        - set: {var: acc, value: "ok"}
+`)
+	vars, _, err := ExecuteWith(context.Background(), f, Deps{},
+		map[string]string{"items": "a\nb"})
+	require.NoError(t, err)
+	assert.Equal(t, "ok\n\nok", vars["acc"])
+}
+
+// A step further down the body reads the collect variable as THIS iteration
+// left it. Before, it saw the previous iteration's value wherever this one had
+// written none — a stale read with nothing to show for it.
+func TestForEachBodyDoesNotSeeThePreviousIteration(t *testing.T) {
+	f := parseFlow(t, `
+steps:
+  - for_each:
+      in: items
+      as: it
+      collect: found
+      steps:
+        - if:
+            cond: "it contains keep"
+            then:
+              - set: {var: found, value: "{{it}}"}
+        - name: note
+          when: "found is empty"
+          set: {var: misses, value: "{{misses}}{{it}} "}
+`)
+	vars, _, err := ExecuteWith(context.Background(), f, Deps{},
+		map[string]string{"items": "keep one\ndrop two\nkeep three"})
+	require.NoError(t, err)
+	assert.Equal(t, "keep one\n\nkeep three", vars["found"])
+	assert.Equal(t, "drop two ", vars["misses"], "the second iteration saw the first one's find")
+}
+
 // The ceiling is required in spirit: a loop over a collection of unknown length
 // is a straight road to a runaway. Partial processing is SAID OUT LOUD rather
 // than swallowed.

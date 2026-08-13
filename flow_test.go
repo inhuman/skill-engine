@@ -305,7 +305,10 @@ func TestValidate(t *testing.T) {
 		"empty flow":          `steps: []`,
 		"step with no action": "steps:\n  - name: x",
 		"switch without var":  "steps:\n  - switch:\n      cases: {}",
-		"malformed condition": "steps:\n  - if:\n      cond: \"a > b\"\n      then: []",
+		// `a > b` used to belong here and is now a numeric comparison of two
+		// variables; what is left malformed is an operator the grammar has no
+		// idea about.
+		"malformed condition": "steps:\n  - if:\n      cond: \"a ~ b\"\n      then: []",
 		"unknown policy":      "steps:\n  - instruction: x\n    on_error: retry",
 		"negative limit":      "steps:\n  - instruction: x\n    max_calls: -1",
 	}

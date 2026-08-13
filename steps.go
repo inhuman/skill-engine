@@ -456,6 +456,20 @@ func (s *state) forEachStep(ctx context.Context, step Step) (bool, error) {
 	failed := 0
 	for _, item := range items {
 		s.set(fe.As, item)
+		// Emptied BEFORE the body, so that what is collected is what THIS
+		// iteration produced. The value used to be read after the body without
+		// ever being cleared, and an iteration that wrote nothing — the branch
+		// inside it did not fire — contributed whatever the previous iteration
+		// had left there. A loop that picks three of five items out of a list
+		// returned five, with two of them duplicates, and the duplicates look
+		// exactly like honest results.
+		//
+		// It also fixes a stale read the other way round: a later step in the
+		// same body reading the collect variable used to see the PREVIOUS
+		// iteration's value where this one had written none.
+		if fe.Collect != "" {
+			s.set(fe.Collect, "")
+		}
 		if _, err := s.run(ctx, fe.Steps); err != nil {
 			if errors.Is(err, ErrExit) {
 				return false, err
@@ -525,12 +539,32 @@ func splitCollection(v string) []string {
 		if err := json.Unmarshal([]byte(v), &arr); err == nil {
 			out := make([]string, 0, len(arr))
 			for _, e := range arr {
-				out = append(out, fmt.Sprint(e))
+				out = append(out, itemText(e))
 			}
 			return out
 		}
 	}
 	return nonEmpty(strings.Split(v, "\n"))
+}
+
+// itemText — one element of a collection as the loop's body will see it.
+//
+// A string is itself; everything else goes back to JSON. Not fmt.Sprint: an
+// array of OBJECTS — the natural output of a step with a response_schema — came
+// out as Go's map formatting (`map[name:api restartCount:12]`), and the whole
+// object went with it. Field access (`{{pod.name}}`, a condition on
+// `pod.restartCount`) has nothing to parse and resolves to emptiness, while the
+// model is shown a syntax belonging to the language the engine happens to be
+// written in.
+func itemText(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprint(v)
+	}
+	return string(b)
 }
 
 func nonEmpty(in []string) []string {

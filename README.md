@@ -472,6 +472,54 @@ Two properties are worth knowing before you write a dictionary:
 Regular expressions are deliberately absent: they would make skills unreadable
 and open the door to catastrophic backtracking.
 
+## Branching on a number
+
+Counters, ids and thresholds parsed out of a request were in the flow all along,
+and until 2.3.0 the only thing expressible about one was equality with a
+literal. A comparison — `>`, `>=`, `<`, `<=` — reads in the same place, and the
+right side may be a number or the name of a variable holding one, because a
+threshold usually arrives from the step that parsed the request:
+
+```yaml
+- name: process_pods
+  for_each:
+    in: pods
+    as: pod
+    collect: hot
+    steps:
+      - name: check_restart
+        if:
+          cond: "pod.restartCount > req.threshold"
+          then:
+            - set: {var: hot, value: "{{pod.name}}"}
+```
+
+That is the shape the case arrives in: "keep the ones over the threshold" gets
+written as a loop with a branch inside, which is why the format needs no
+collection filter of its own. Before this, the same skill either asked the MODEL
+to apply the threshold — a deterministic rule handed to the least deterministic
+thing in the turn — or called an asset to compare two numbers.
+
+Two rules, both of them there to keep a wrong branch from being invisible:
+
+- an operand that is not a number **stops the turn** rather than quietly
+  evaluating to false. A condition is the one place where a wrong answer leaves
+  no trace: `restarts > 5` looks right whatever it returns;
+- an empty variable is **not zero**. A step that returned nothing leaves
+  `restarts` empty, and reading that as 0 makes "no data" indistinguishable from
+  "few restarts" — the same reason `is empty` is a form of its own. Where
+  emptiness is legal, `var is not empty` in front says so.
+
+Two integers are compared as integers, so a nineteen-digit id does not lose its
+last digits to float64. `==` stays textual: `"5" == "5.0"` is false, and the
+equalities already written compare ids and sentinels. A variable is named
+without `{{ }}` — the braces belong to substitution, and a condition takes the
+name itself.
+
+Arithmetic (`a + b > c`, `len(x) > 0`) is absent for the same reason as regular
+expressions: those are expressions, and expressions are the door to skills that
+cannot be read from top to bottom.
+
 ## Shared step settings
 
 What repeats across a catalogue is usually not the step but its envelope. A

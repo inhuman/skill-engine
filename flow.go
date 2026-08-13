@@ -272,7 +272,10 @@ type ForEach struct {
 	// As — the name of the item variable inside the loop body.
 	As    string `yaml:"as"`
 	Steps []Step `yaml:"steps"`
-	// Collect — the variable the iterations' results are gathered into.
+	// Collect — the variable the iterations' results are gathered into. It is
+	// emptied before each iteration, so what is gathered is what THAT iteration
+	// produced: one whose branch did not fire contributes nothing instead of
+	// repeating whatever the previous one left behind.
 	Collect string `yaml:"collect,omitempty"`
 	// MaxIterations — the ceiling. Required IN SPIRIT even when not set
 	// explicitly: a loop over a collection of unknown length is a straight road
@@ -326,7 +329,8 @@ type Switch struct {
 	Default []Step            `yaml:"default,omitempty"`
 }
 
-// If — branching on a condition of the form "var == value" / "var != value".
+// If — branching on a condition: "var == value", "var is [not] empty",
+// "var contains a | b", "var > 5" (see cond.go for the whole grammar).
 type If struct {
 	Cond string `yaml:"cond"`
 	Then []Step `yaml:"then"`
