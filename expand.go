@@ -3,17 +3,11 @@ package skillengine
 // {{var}} substitution and normalisation of step values.
 
 import (
-	"encoding/json"
 	"regexp"
 	"strings"
 	"unicode"
 )
 
-// varRe catches {{var}} and {{var.field}} — one level of nesting.
-//
-// Deeper is deliberately absent: the observed cases are flat, and nesting
-// drags in indexes, filters and the rest of a template engine the format
-// avoids.
 // assetRe catches {{asset:name}} — substituting a payload's content into the
 // TEXT of an instruction.
 //
@@ -26,14 +20,23 @@ import (
 // way, into a tool argument past the model.
 var assetRe = regexp.MustCompile(`\{\{\s*asset:([a-zA-Z_][a-zA-Z0-9_-]*)\s*\}\}`)
 
-var varRe = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\s*\}\}`)
+// varRe catches a reference in braces: {{var}}, {{var.field}}, {{var.a.b}},
+// {{var.items[0].name}}. The shape of the reference itself lives in one place
+// (RefPattern) — see path.go.
+var varRe = regexp.MustCompile(`\{\{\s*(` + RefPattern + `)\s*\}\}`)
 
 // expand substitutes {{var}}. An unknown variable becomes an empty string
 // rather than staying as text: a marker that reaches the model reads to it as
 // part of the instruction and produces questions about "the variable var".
-func (s *state) expand(text string) string {
-	out, _ := s.expandWith(text, func(name string) (string, bool) { return s.lookup(name), true })
-	return out
+//
+// A PATH that does not resolve is an error instead — see resolve: the silence
+// is a promise to the shapes that existed before paths did, not to the paths.
+func (s *state) expand(text string) (string, error) {
+	out, _, err := s.expandWith(text, func(name string) (string, bool, error) {
+		v, err := s.resolve(name)
+		return v, true, err
+	})
+	return out, err
 }
 
 // expandWhole — substitution for a step that CANNOT fetch the rest of a value.
@@ -61,38 +64,48 @@ func (s *state) expand(text string) string {
 // Returns the name of the first variable that could NOT be made whole — the
 // value carries a handle and there is no reader for it, or the reader no longer
 // has it. The step still runs, on the fragment, and the caller is told.
-func (s *state) expandWhole(text string) (string, string) {
-	return s.expandWith(text, func(name string) (string, bool) {
-		raw := s.lookup(name)
+func (s *state) expandWhole(text string) (string, string, error) {
+	return s.expandWith(text, func(name string) (string, bool, error) {
+		raw, err := s.resolve(name)
+		if err != nil {
+			return "", true, err
+		}
 		id := memHandle(raw)
 		if id == "" {
-			return trimHostNote(raw, s.vocab.TruncationNotes), true
+			return trimHostNote(raw, s.vocab.TruncationNotes), true, nil
 		}
 		if s.memory != nil {
 			if full, ok := s.memory.Get(id); ok {
-				return trimHostNote(full, s.vocab.TruncationNotes), true
+				return trimHostNote(full, s.vocab.TruncationNotes), true, nil
 			}
 		}
 		// The note goes even so: an instruction to make a call this step cannot
 		// make is worse than a fragment, and the fragment is reported.
-		return trimHostNote(raw, s.vocab.TruncationNotes), false
+		return trimHostNote(raw, s.vocab.TruncationNotes), false, nil
 	})
 }
 
-func (s *state) expandWith(text string, value func(name string) (string, bool)) (string, string) {
+func (s *state) expandWith(text string, value func(name string) (string, bool, error)) (string, string, error) {
 	text = assetRe.ReplaceAllStringFunc(text, func(m string) string {
 		return s.asset(assetRe.FindStringSubmatch(m)[1])
 	})
 	unresolved := ""
+	var failed error
 	out := varRe.ReplaceAllStringFunc(text, func(m string) string {
 		name := varRe.FindStringSubmatch(m)[1]
-		v, ok := value(name)
+		v, ok, err := value(name)
+		// The FIRST failure is the one reported: a text with three broken paths
+		// is one mistake made three times, and the walk cannot be stopped
+		// halfway through a replacement anyway.
+		if err != nil && failed == nil {
+			failed = err
+		}
 		if !ok && unresolved == "" {
 			unresolved = name
 		}
 		return v
 	})
-	return out, unresolved
+	return out, unresolved, failed
 }
 
 // expandForArgs — substitution into call ARGUMENTS, not into an instruction.
@@ -111,13 +124,12 @@ func (s *state) expandWith(text string, value func(name string) (string, bool)) 
 // field access and for_each.
 //
 // So values go into arguments WHOLE and WITHOUT the host's note.
-func (s *state) expandForArgs(text string) string {
-	text = assetRe.ReplaceAllStringFunc(text, func(m string) string {
-		return s.asset(assetRe.FindStringSubmatch(m)[1])
+func (s *state) expandForArgs(text string) (string, error) {
+	out, _, err := s.expandWith(text, func(name string) (string, bool, error) {
+		v, err := s.payload(name)
+		return v, true, err
 	})
-	return varRe.ReplaceAllStringFunc(text, func(m string) string {
-		return s.payload(varRe.FindStringSubmatch(m)[1])
-	})
+	return out, err
 }
 
 // payload — a variable as a consumer that is NOT the model must see it: whole,
@@ -135,8 +147,12 @@ func (s *state) expandForArgs(text string) string {
 // So there is exactly one way to ask for the data form, and any new consumer
 // has to say which of the two it wants — `expand` for the model, this for
 // everyone else. A guard test keeps it that way.
-func (s *state) payload(name string) string {
-	return trimHostNote(s.fullValue(s.lookup(name)), s.vocab.TruncationNotes)
+func (s *state) payload(name string) (string, error) {
+	v, err := s.resolve(name)
+	if err != nil {
+		return "", err
+	}
+	return trimHostNote(s.fullValue(v), s.vocab.TruncationNotes), nil
 }
 
 // asset returns a payload's content, fetching it on first use.
@@ -167,72 +183,6 @@ func (s *state) asset(name string) string {
 	}
 	s.assetCache[name] = v
 	return v
-}
-
-// lookup returns the value of a variable or of its field.
-//
-// A field is looked up in the JSON object a step stored in the variable (a
-// structured answer). A missing one yields an empty string, same as a missing
-// variable: a marker that reached the model would read as part of the
-// instruction.
-func (s *state) lookup(name string) string {
-	if v, ok := s.vars[name]; ok {
-		return v
-	}
-	base, field, hasField := strings.Cut(name, ".")
-	if !hasField {
-		return ""
-	}
-	raw, ok := s.vars[base]
-	if !ok {
-		return ""
-	}
-	obj, ok := s.objectOf(raw)
-	if !ok {
-		return ""
-	}
-	v, ok := obj[field]
-	if !ok {
-		return ""
-	}
-	if str, isStr := v.(string); isStr {
-		return str
-	}
-	out, err := json.Marshal(v)
-	if err != nil {
-		return ""
-	}
-	return string(out)
-}
-
-// objectOf parses a variable's value as a JSON object.
-//
-// A variable's value is what the host WOULD show the model, not the raw tool
-// output: a working-memory handle ("[mem:id]") is always appended, and a large
-// one is truncated to a preview on top of that. Both break parsing, which is
-// why the field silently went empty for ANY `call:` result — {{var.field}}
-// substitution never worked on such variables.
-//
-// Order: strip the host's note and try; if that failed (truncated), take the
-// whole thing from working memory by the handle — that is what it is appended
-// for.
-func (s *state) objectOf(raw string) (map[string]any, bool) {
-	var obj map[string]any
-	if err := json.Unmarshal([]byte(trimHostNote(raw, s.vocab.TruncationNotes)), &obj); err == nil {
-		return obj, true
-	}
-	id := memHandle(raw)
-	if id == "" || s.memory == nil {
-		return nil, false
-	}
-	full, ok := s.memory.Get(id)
-	if !ok {
-		return nil, false
-	}
-	if err := json.Unmarshal([]byte(full), &obj); err != nil {
-		return nil, false
-	}
-	return obj, true
 }
 
 // fullValue returns a variable's value IN FULL.
@@ -285,15 +235,19 @@ func trimHostNote(s string, notes []string) string {
 // expandArgs substitutes {{var}} into STRING argument values, walking nested
 // structures. Numbers, flags and object shape stay as written: substitution is
 // about values, not about the call's schema.
-func (s *state) expandArgs(args map[string]any) map[string]any {
+func (s *state) expandArgs(args map[string]any) (map[string]any, error) {
 	if len(args) == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make(map[string]any, len(args))
 	for k, v := range args {
-		out[k] = s.expandAny(v)
+		e, err := s.expandAny(v)
+		if err != nil {
+			return nil, err
+		}
+		out[k] = e
 	}
-	return out
+	return out, nil
 }
 
 // callArgs prepares the arguments of a `call:` step: value substitution plus
@@ -310,20 +264,23 @@ func (s *state) expandArgs(args map[string]any) map[string]any {
 // An explicit `_deliver` in the step's arguments wins: it is written for that
 // specific call, whereas the asset's declaration is a default for all of its
 // consumers.
-func (s *state) callArgs(args map[string]any) map[string]any {
-	out := s.expandArgs(args)
+func (s *state) callArgs(args map[string]any) (map[string]any, error) {
+	out, err := s.expandArgs(args)
+	if err != nil {
+		return nil, err
+	}
 	if _, explicit := out["_deliver"]; explicit {
-		return out
+		return out, nil
 	}
 	to := s.assetDeliver(args)
 	if to == "" {
-		return out
+		return out, nil
 	}
 	if out == nil {
 		out = make(map[string]any, 1)
 	}
 	out["_deliver"] = map[string]any{"to": to}
-	return out
+	return out, nil
 }
 
 // assetDeliver returns the delivery route declared by the first asset that
@@ -346,7 +303,7 @@ func (s *state) assetDeliver(args map[string]any) string {
 	return ""
 }
 
-func (s *state) expandAny(v any) any {
+func (s *state) expandAny(v any) (any, error) {
 	switch t := v.(type) {
 	case string:
 		return s.expandForArgs(t)
@@ -357,18 +314,22 @@ func (s *state) expandAny(v any) any {
 		// exactly what assets exist for.
 		if from, ok := t["from"].(string); ok && len(t) == 1 {
 			if name, isAsset := strings.CutPrefix(from, "asset:"); isAsset {
-				return s.asset(name)
+				return s.asset(name), nil
 			}
 		}
 		return s.expandArgs(t)
 	case []any:
 		out := make([]any, len(t))
 		for i, e := range t {
-			out[i] = s.expandAny(e)
+			x, err := s.expandAny(e)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = x
 		}
-		return out
+		return out, nil
 	default:
-		return v
+		return v, nil
 	}
 }
 

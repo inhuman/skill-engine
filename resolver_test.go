@@ -17,12 +17,12 @@ import (
 // Deliberately short, and each entry is here because it IS the mechanism rather
 // than a consumer of it:
 //
-//	lookup   — the resolver itself: the one place that reads a variable, and
-//	           the only one that knows a name may address a field;
-//	set      — the writer, the counterpart of lookup;
+//	resolve  — the resolver itself: the one place that reads a variable, and
+//	           the only one that knows a name may be a path into its value;
+//	set      — the writer, the counterpart of resolve;
 //	newState — seeds the variables that came in, before any step runs.
 var allowedVarsAccess = map[string]bool{
-	"lookup":   true,
+	"resolve":  true,
 	"set":      true,
 	"newState": true,
 }

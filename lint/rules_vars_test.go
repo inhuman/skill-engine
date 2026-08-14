@@ -63,6 +63,40 @@ func TestW14_ForwardReference(t *testing.T) {
 	requireFinding(t, rep, "W14", lint.SeverityError)
 }
 
+// A reference may be a PATH into a value, and the rule reads it the way the
+// engine does: the variable it starts from is what a linter can check, while
+// where the path leads is runtime shape. Reading it with a narrower grammar is
+// worse than not reading it at all — the reference goes unchecked in silence,
+// and the unchecked half is the newest half of the format.
+func TestW14_PathsAreReadAsFarAsTheirVariable(t *testing.T) {
+	rep := lintSkill(t, wf(`  tools: ["docs"]
+  steps:
+    - name: fetch
+      instruction: fetch the pod
+      tools: []
+      save_as: pod
+    - name: report
+      when: "pod.status.containerStatuses[0].restartCount > 0"
+      instruction: "{{pod.metadata.name}} in {{pod.status.containerStatuses[0].name}}"
+      tools: []
+`))
+	requireQuiet(t, rep, "W14")
+
+	// The same paths, one letter wrong in the variable they start from.
+	rep = lintSkill(t, wf(`  tools: ["docs"]
+  steps:
+    - name: fetch
+      instruction: fetch the pod
+      tools: []
+      save_as: pod
+    - name: report
+      instruction: "{{pood.status.containerStatuses[0].name}}"
+      tools: []
+`))
+	f := requireFinding(t, rep, "W14", lint.SeverityError)
+	assert.Contains(t, f.Message, "pood")
+}
+
 // A numeric comparison names a variable on BOTH sides, and a typo in the
 // THRESHOLD is the same silence as a typo in the value: the condition looks
 // right, and the branch it guards never fires the way it reads.

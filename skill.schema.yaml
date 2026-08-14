@@ -474,8 +474,8 @@ $defs:
         type: object
         description: |
           The schema of the step's structured answer. The result is stored in
-          the variable as an object, fields reachable as `{{var.field}}` — ONE
-          level of nesting.
+          the variable as an object, and a value inside it is reached by a PATH:
+          `{{var.field}}`, `{{var.a.b.c}}`, `{{var.items[0].name}}`.
 
           Why: a live parsing step extracts the cluster, the namespace and the
           pod in ONE step instead of three, i.e. −2 generations per turn in a
@@ -583,6 +583,11 @@ $defs:
             abort    — stop the flow (default);
             continue — record the failure into a variable and move on;
             skip     — skip the rest of the CURRENT branch.
+
+          It applies to every kind of step that can fail, which since 2.4.0
+          includes `set`, `switch` and `if`: a path that does not resolve is a
+          failure, and these three are where one is read without a model or a
+          tool involved.
           A permission refusal is marked DENIED:, any other breakage ERROR:; the
           policy tells them apart, an `is empty` branch does not.
 
@@ -941,6 +946,14 @@ $defs:
             var >= other.var      number or the name of a variable holding one
           A variable is named WITHOUT {{ }} here — the braces belong to
           substitution, and a condition takes the name itself.
+
+          On the left stands a REFERENCE: a name, or a path into the value —
+          `ctx.mode`, `pod.status.containerStatuses[0].restartCount`. The same
+          shape substitution takes. A path that does not resolve is an error,
+          not a false: `a.b.c` with `b` missing would otherwise be
+          indistinguishable from "the value is empty", and branches are taken on
+          it. `[*]` and filters are refused on purpose — a path resolves to ONE
+          value, and picking many is what `for_each` is for.
 
           `is empty` exists because to a "nothing found, try another way" branch
           emptiness and a failure mean the same thing, even though to the policy

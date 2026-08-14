@@ -20,9 +20,14 @@ import (
 // search through the file finds it, and suspicion falls on anything except the
 // order of the steps.
 
-// varRefRE — a `{{name}}` reference. Dots are allowed inside (a field of an
-// object) along with the engine's suffixes; the engine trims the spaces itself.
-var varRefRE = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*\}\}`)
+// varRefRE — a `{{name}}` reference: a name, a path into its value
+// (`ctx.status.pods[0].name`), or the engine's suffixes. The engine trims the
+// spaces itself.
+//
+// The shape is taken from the engine rather than spelled out again: a reference
+// this rule cannot parse is a reference it silently does not check, and the
+// half of the format it stopped seeing would be the newest half.
+var varRefRE = regexp.MustCompile(`\{\{\s*(` + skillengine.RefPattern + `)\s*\}\}`)
 
 func (r *run) workflowVarRefs(flow *skillengine.Flow) {
 	known := set(r.opts.HostVars)
@@ -265,15 +270,19 @@ func producedBy(s *skillengine.Step) []string {
 
 // knownVarBase checks a reference and returns the base name when it is unknown.
 //
-// `x.field` is legitimate when `x` exists: the value is parsed as an object and
-// the field is taken from it. The engine's suffixes (the memory handle, the
-// skipped marker) are references to the base name too.
+// `x.field` and `x.a.b[0]` are legitimate when `x` exists: the value is parsed
+// as JSON and the path walked into it. The engine's suffixes (the memory
+// handle, the skipped marker) are references to the base name too.
+//
+// Where the path itself leads is not this rule's business — that is runtime
+// shape, and the engine refuses a path that does not resolve. What a linter can
+// see is whether the variable it starts from exists at all.
 func knownVarBase(ref string, scope map[string]bool) (string, bool) {
 	if scope[ref] {
 		return "", true
 	}
 	base := ref
-	if i := strings.Index(ref, "."); i > 0 {
+	if i := strings.IndexAny(ref, ".["); i > 0 {
 		base = ref[:i]
 	}
 	if scope[base] {

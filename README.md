@@ -326,6 +326,7 @@ reading when you are writing a skill, not before.
 | [`examples/skills/`](examples/skills/) | the format itself — thirteen skills, each a commented example |
 | [`examples/`](examples/) | two applications that embed the engine, both runnable offline |
 | [skill.schema.yaml](skill.schema.yaml) | the source of truth for the format (`SchemaRU` is the same in Russian) |
+| [handbook/](handbook/) | the failure classes and the forms that avoid them — in Russian, and reachable from code (`HandbookIndex`, `Handbook`) |
 | [lint/README.md](lint/README.md) | the rule table, and what deliberately stays with the embedder |
 | [CHANGELOG.md](CHANGELOG.md) | what changed in each format version, and what a migration does |
 
@@ -565,6 +566,19 @@ it is the stored value that flows on. It works on `call` steps too, except
 - `save_as` puts a step's result into a variable; **a step without `save_as`
   writes into `answer`** — that is where the application takes the turn's
   answer from. An empty `answer` = the program produced no answer.
+- **A value inside a structured result is reached by a path**, in a
+  substitution and in a condition alike: `{{pod.metadata.name}}`,
+  `{{pod.status.containerStatuses[0].restartCount}}`, and the same written
+  without braces on the left of a condition. An index is `[0]`; `[*]` and
+  filters are refused, because a path resolves to ONE value and picking many is
+  what `for_each` is for.
+
+  **A path that does not resolve is an error, not an empty string.** Silence
+  there is worse than useless: `a.b.c` with `b` missing is indistinguishable
+  from "the value is empty", and branches are taken on it. The refusal says
+  where the walk broke and what the object did have. A bare name and a single
+  `var.field` keep their old silence — that promise is what skills already
+  written were built on, and the linter's W14 is what watches it.
 - `<name>.mem` — the working-memory handle of a result, ALWAYS, not only for
   large ones: `args: {stdin: {from: "{{tickets.mem}}"}}` sends the data past
   the model's context. It is read from the value's LAST line, where the host

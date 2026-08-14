@@ -278,7 +278,7 @@ func TestAssetRefInsideListIsResolved(t *testing.T) {
 	c := &recordingCaller{out: "ok"}
 	a := &fakeAssets{content: map[string]string{"battery": "echo hello"}}
 	f := parseFlow(t, `
-tools: ["k8s-job"]
+tools: ["sandbox"]
 assets:
   battery:
     kind: code
@@ -288,7 +288,7 @@ assets:
 steps:
   - name: run
     call:
-      tool: k8s-job:run_job
+      tool: sandbox:run_job
       args:
         image: go-review
         command: ["sh", "-c", {from: "asset:battery"}]

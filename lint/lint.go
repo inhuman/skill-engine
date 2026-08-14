@@ -52,6 +52,17 @@ type Finding struct {
 	Path     string
 	Line     int // 1-based; 0 = the finding is about the whole file
 	Message  string
+	// Handbook — the id of the handbook section that covers this class, empty
+	// when none does. Resolve it with skillengine.Handbook(id).
+	//
+	// A separate field rather than a sentence glued onto Message: the pointer is
+	// for whoever ASSEMBLES the refusal — a person reads it as "see also", a
+	// tool follows it and fetches the section. Measured on the other side of
+	// that: a refusal ending in "call the schema tool" was dead twice over,
+	// because no skill had that tool in its radius and the steps that write
+	// skills run with `tools: []`. A pointer is only worth printing where the
+	// addressee can go, which is what putting the handbook in the module fixed.
+	Handbook string
 }
 
 // Report — the findings of one run plus a summary of what was skipped.
@@ -353,17 +364,15 @@ func compileStale(in []StaleAPI) ([]staleAPI, error) {
 
 // add records a finding on the skill currently being checked.
 func (r *run) add(rule string, sev Severity, format string, args ...any) {
-	r.findings = append(r.findings, Finding{
-		Rule: rule, Severity: sev, Skill: r.skill, Path: r.path,
-		Message: fmt.Sprintf(format, args...),
-	})
+	r.addAt(rule, sev, 0, format, args...)
 }
 
 // addAt is add with a line number.
 func (r *run) addAt(rule string, sev Severity, line int, format string, args ...any) {
 	r.findings = append(r.findings, Finding{
 		Rule: rule, Severity: sev, Skill: r.skill, Path: r.path, Line: line,
-		Message: fmt.Sprintf(format, args...),
+		Message:  fmt.Sprintf(format, args...),
+		Handbook: handbookOf(rule),
 	})
 }
 

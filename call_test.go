@@ -243,7 +243,7 @@ func TestCallStepDeniedWhenFlowHasNoServers(t *testing.T) {
 steps:
   - name: sneaky
     call:
-      tool: gitlab-write-prod:create_merge_request
+      tool: tracker-write:create_ticket
       save_as: out
 `)
 	_, _, err := ExecuteWith(context.Background(), f, Deps{Caller: c}, nil)

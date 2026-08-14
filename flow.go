@@ -738,13 +738,20 @@ func validateSteps(steps []Step, path string) error {
 			at = fmt.Sprintf("%s (%s)", at, s.Name)
 		}
 		n := 0
-		if s.Run != nil && strings.TrimSpace(s.Run.Instruction) != "" {
-			n++
+		// `on_error` is a STEP-level key and lands in the inline Run whatever the
+		// step does — so it is checked here rather than beside the instruction.
+		// Since a reference became a path, `set`, `switch` and `if` can fail too
+		// and their policy is read from this same field; an unknown value there
+		// would quietly mean abort, which is a declaration without an effect.
+		if s.Run != nil {
 			switch s.Run.OnError {
 			case "", PolicyAbort, PolicyContinue, PolicySkip:
 			default:
 				return fmt.Errorf("%s: unknown on_error %q", at, s.Run.OnError)
 			}
+		}
+		if s.Run != nil && strings.TrimSpace(s.Run.Instruction) != "" {
+			n++
 			if s.Run.MaxCalls < 0 {
 				return fmt.Errorf("%s: max_calls is negative", at)
 			}

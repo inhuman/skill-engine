@@ -13,7 +13,12 @@ import (
 	"unicode/utf8"
 )
 
-var condRe = regexp.MustCompile(`^\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*(==|!=)\s*(.*?)\s*$`)
+// The left operand of every condition is a REFERENCE — a name or a path into a
+// value (`pod.status.containers[0].image`). Its shape is defined once, in
+// path.go, and built into each of these: two spellings of one thing had already
+// drifted apart here (substitution stopped at one field while a condition took
+// any number of dots and a trailing one).
+var condRe = regexp.MustCompile(`^\s*(` + RefPattern + `)\s*(==|!=)\s*(.*?)\s*$`)
 
 // emptyCondRe — the "step produced nothing" condition: `var is empty` /
 // `var is not empty`.
@@ -24,7 +29,7 @@ var condRe = regexp.MustCompile(`^\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*(==|!=)\s*(.*?)
 // they mean the same. This pattern showed up three times in a single live
 // skill, and a meaning repeated in three places belongs to the engine rather
 // than to the skill (same reasoning as ErrorPolicy).
-var emptyCondRe = regexp.MustCompile(`^\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s+is\s+(not\s+)?empty\s*$`)
+var emptyCondRe = regexp.MustCompile(`^\s*(` + RefPattern + `)\s+is\s+(not\s+)?empty\s*$`)
 
 // containsCondRe — the "the text names one of these" condition:
 // `var contains a | b | c` / `var not contains a | b`.
@@ -45,7 +50,7 @@ var emptyCondRe = regexp.MustCompile(`^\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s+is\s+(not\
 // The list may come out empty here on purpose: `input contains` with nothing
 // after it is recognised as this form so the error can say what is missing,
 // rather than falling through to "the condition does not parse".
-var containsCondRe = regexp.MustCompile(`^\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s+(not\s+)?contains\b\s*(.*?)\s*$`)
+var containsCondRe = regexp.MustCompile(`^\s*(` + RefPattern + `)\s+(not\s+)?contains\b\s*(.*?)\s*$`)
 
 // numCondRe — the numeric comparisons: `var > 5`, `var >= req.limit`,
 // `var < 0.5`, `var <= days`.
@@ -72,7 +77,7 @@ var containsCondRe = regexp.MustCompile(`^\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s+(not\s+
 // Deliberately NOT here: arithmetic (`a + b > c`, `len(x) > 0`). Those are
 // expressions, and expressions are the door to skills that cannot be read from
 // top to bottom.
-var numCondRe = regexp.MustCompile(`^\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*(>=|<=|>|<)\s*(\S.*?)\s*$`)
+var numCondRe = regexp.MustCompile(`^\s*(` + RefPattern + `)\s*(>=|<=|>|<)\s*(\S.*?)\s*$`)
 
 // numberRe — what counts as a number on either side of a comparison.
 //
@@ -81,10 +86,6 @@ var numCondRe = regexp.MustCompile(`^\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*(>=|<=|>|<)\
 // against every threshold and look exactly like a number that is merely small —
 // the silence these conditions are written to avoid.
 var numberRe = regexp.MustCompile(`^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$`)
-
-// nameRe — a variable name: the shape the left side of every condition takes,
-// and the shape the right side of a comparison takes when it is not a literal.
-var nameRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_.]*$`)
 
 // bracedLeftRe / bracedNameRe — a condition written the way substitution is
 // written everywhere else: `{{pod.restartCount}} > 5`.
@@ -100,9 +101,17 @@ var nameRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_.]*$`)
 // them by exactly two pairs of braces; now the error names the braces and
 // prints the condition without them.
 var (
-	bracedLeftRe = regexp.MustCompile(`^\s*\{\{\s*[a-zA-Z_][a-zA-Z0-9_.]*\s*\}\}`)
-	bracedNameRe = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*\}\}`)
+	bracedLeftRe = regexp.MustCompile(`^\s*\{\{\s*` + RefPattern + `\s*\}\}`)
+	bracedNameRe = regexp.MustCompile(`\{\{\s*(` + RefPattern + `)\s*\}\}`)
 )
+
+// selectorRe — the form a path deliberately does not have: `containers[*]`, and
+// filters after it. It appeared in the same measurement as the paths themselves
+// (`containerStatuses[*].restartCount > 0`), which is why it gets a refusal of
+// its own instead of falling into the list of allowed shapes: the author did
+// not mistype the syntax, they asked for something the format declines to be —
+// a query language. What they want is a loop, and the message says so.
+var selectorRe = regexp.MustCompile(`\[\s*[*?]`)
 
 // isBlank — "the step produced nothing useful": empty or a failure marker.
 func isBlank(v string) bool {
@@ -118,6 +127,11 @@ func isBlank(v string) bool {
 // with nothing to look for can never fire, and a branch that can never run is
 // not a branch, it is a hole the author cannot see.
 func parseCond(cond string) (name, op, want string, err error) {
+	if selectorRe.MatchString(cond) {
+		return "", "", "", fmt.Errorf("condition %q: `[*]` picks MANY elements and a condition compares one — "+
+			"walk the list with `for_each` and put the condition in its body. "+
+			"A single element is `list[0]`", cond)
+	}
 	if bracedLeftRe.MatchString(cond) {
 		bare := strings.TrimSpace(bracedNameRe.ReplaceAllString(cond, "$1"))
 		// The suggestion is checked before it is offered: `{{a}} > пять` is two
@@ -151,7 +165,7 @@ func parseCond(cond string) (name, op, want string, err error) {
 		// Static, because it can never work: `count > пять` is wrong in the
 		// file, not at the moment the branch is reached. Validate calls this
 		// parser, so the skill is refused at load instead of mid-turn.
-		if _, ok := parseNumber(m[3]); !ok && !nameRe.MatchString(m[3]) {
+		if _, ok := parseNumber(m[3]); !ok && !refRe.MatchString(m[3]) {
 			return "", "", "", fmt.Errorf("condition %q: the right side of `%s` must be a number or the name of "+
 				"a variable holding one, and %q is neither", cond, m[2], m[3])
 		}
@@ -372,7 +386,10 @@ func (s *state) eval(cond string) (bool, error) {
 	// A large result lives in a variable as a preview plus a handle, and a
 	// condition reading the preview would answer about the first few hundred
 	// bytes while looking exactly as if it had answered about the value.
-	got := s.payload(name)
+	got, err := s.payload(name)
+	if err != nil {
+		return false, err
+	}
 	switch op {
 	case "is empty":
 		return isBlank(got), nil
@@ -407,7 +424,11 @@ func (s *state) operand(cond, ref string) (number, error) {
 	if n, ok := parseNumber(ref); ok {
 		return n, nil
 	}
-	got := strings.TrimSpace(s.payload(ref))
+	raw, err := s.payload(ref)
+	if err != nil {
+		return number{}, err
+	}
+	got := strings.TrimSpace(raw)
 	if isBlank(got) {
 		return number{}, fmt.Errorf("condition %q: `%s` is empty (or a marked failure) — there is nothing to "+
 			"compare. An empty variable is NOT zero: answering the comparison would make "+
