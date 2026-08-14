@@ -235,6 +235,82 @@ func TestBracedDeepPathNamesTheBraces(t *testing.T) {
 	assert.Contains(t, err.Error(), "`pod.status.containerStatuses[0].restartCount > 0`")
 }
 
+// A caption must not cancel the exit it captions. `exit` is how a skill hands
+// the turn back — "not my case" — and the consumer tells that apart from a
+// failure: a skill run by name stops the turn on a failure and does not on an
+// exit. A path that would not resolve in the reason must not silently turn one
+// into the other, so the substitution there is best-effort and what did not
+// resolve stays visible as written.
+func TestABrokenPathInAnExitReasonStillExits(t *testing.T) {
+	f := parseFlow(t, `
+steps:
+  - name: not_mine
+    exit: {reason: "not my case: {{req.data.cluster}}"}
+  - name: never
+    set: {var: reached, value: "yes"}
+`)
+	vars, outcome, err := ExecuteWith(context.Background(), f, Deps{},
+		map[string]string{"req": `{"kind": "other"}`})
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrExit, "a caption that would not interpolate cancelled the exit")
+
+	var exit *ExitError
+	require.ErrorAs(t, err, &exit)
+	assert.Equal(t, "not my case: {{req.data.cluster}}", exit.Reason,
+		"what did not resolve stays as written, where the reader can see it")
+	assert.Empty(t, vars["reached"], "the flow stopped, as an exit does")
+	assert.Equal(t, "exit", outcome.Steps[0].Outcome)
+}
+
+// A caption that DOES resolve is substituted as always — best-effort is the
+// fallback, not the behaviour.
+func TestAnExitReasonIsStillInterpolated(t *testing.T) {
+	f := parseFlow(t, `
+steps:
+  - exit: {reason: "not my case: {{req.kind}}"}
+`)
+	_, _, err := ExecuteWith(context.Background(), f, Deps{},
+		map[string]string{"req": `{"kind": "other"}`})
+	var exit *ExitError
+	require.ErrorAs(t, err, &exit)
+	assert.Equal(t, "not my case: other", exit.Reason)
+}
+
+// `set`, `switch` and `if` could not fail at all until a reference became a
+// path. Now that they can, they do what every other kind has always done:
+// leave a trace and consult the policy the step already declares.
+func TestABrokenPathInSetSwitchAndIfObeysThePolicy(t *testing.T) {
+	for _, kind := range []string{
+		`set: {var: name, value: "{{pod.status.nope.deeper}}"}`,
+		`switch: {var: pod.status.nope.deeper, cases: {a: [{set: {var: x, value: y}}]}}`,
+		`if: {cond: "pod.status.nope.deeper == 1", then: [{set: {var: x, value: y}}]}`,
+	} {
+		t.Run(kind[:3], func(t *testing.T) {
+			src := `
+steps:
+  - name: risky
+    ` + kind + `
+    on_error: continue
+  - name: after
+    set: {var: reached, value: "yes"}
+`
+			vars, outcome, err := ExecuteWith(context.Background(), parseFlow(t, src), Deps{},
+				map[string]string{"pod": podDetails})
+			require.NoError(t, err, "the step declared `continue` and the flow stopped anyway")
+			assert.Equal(t, "yes", vars["reached"])
+			require.NotEmpty(t, outcome.Steps)
+			assert.Equal(t, "error", outcome.Steps[0].Outcome, "a tolerated failure still leaves a trace")
+			assert.Contains(t, outcome.Steps[0].Reason, "has no field `nope`")
+
+			// Without a policy the same failure stops the turn.
+			strict := strings.Replace(src, "\n    on_error: continue", "", 1)
+			_, _, err = ExecuteWith(context.Background(), parseFlow(t, strict), Deps{},
+				map[string]string{"pod": podDetails})
+			require.Error(t, err)
+		})
+	}
+}
+
 // A value large enough to be a whole tool result is clipped in the refusal: the
 // sentence saying what is wrong has to survive it.
 func TestTheNotJSONRefusalDoesNotPrintEverything(t *testing.T) {

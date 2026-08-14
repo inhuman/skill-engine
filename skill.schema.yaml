@@ -583,6 +583,11 @@ $defs:
             abort    — stop the flow (default);
             continue — record the failure into a variable and move on;
             skip     — skip the rest of the CURRENT branch.
+
+          It applies to every kind of step that can fail, which since 2.4.0
+          includes `set`, `switch` and `if`: a path that does not resolve is a
+          failure, and these three are where one is read without a model or a
+          tool involved.
           A permission refusal is marked DENIED:, any other breakage ERROR:; the
           policy tells them apart, an `is empty` branch does not.
 

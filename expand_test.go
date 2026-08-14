@@ -126,8 +126,8 @@ type fakeMemory map[string]string
 func (m fakeMemory) Get(id string) (string, bool) { v, ok := m[id]; return v, ok }
 
 // The host appends a handle to ANY tool result, and the variable stops being
-// valid JSON. Without stripping the note, `{{var.field}}` did not work ONCE on
-// any `call:` result — the field silently went empty.
+// valid JSON. Strip the note or no reference into a `call:` result parses at
+// all — the field would go silently empty on every one of them.
 func TestFieldLookupIgnoresHostMemNote(t *testing.T) {
 	s := &state{vars: map[string]string{
 		"ctx": `{"head_sha":"abc123","delta_scope":"go"}` + "\n[mem:res-1]",

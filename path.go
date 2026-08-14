@@ -171,15 +171,15 @@ func (s *state) resolve(ref string) (string, error) {
 
 // valueOf parses a variable's value as JSON — an object or a list.
 //
-// A variable's value is what the host WOULD show the model, not the raw tool
-// output: a working-memory handle ("[mem:id]") is always appended, and a large
-// one is truncated to a preview on top of that. Both break parsing, which is
-// why the field silently went empty for ANY `call:` result — {{var.field}}
-// substitution never worked on such variables.
+// Two things stand between the value and the parser, and both are the host's
+// doing: a variable holds what the host WOULD show the model, so a
+// working-memory handle ("[mem:id]") is appended to any result and a large one
+// is truncated to a preview on top of that. Either of them alone makes the text
+// not JSON, so a path into a `call:` result has to deal with both.
 //
-// Order: strip the host's note and try; if that failed (truncated), take the
-// whole thing from working memory by the handle — that is what it is appended
-// for.
+// Order: strip the host's note and try; if that failed — the value is a
+// truncated preview and no longer parses at all — take the whole thing from
+// working memory by the handle, which is what the handle is appended for.
 func (s *state) valueOf(raw string) (any, bool) {
 	var v any
 	if err := json.Unmarshal([]byte(trimHostNote(raw, s.vocab.TruncationNotes)), &v); err == nil {

@@ -68,6 +68,21 @@ it did; a skill that uses one must declare `skill_engine_version: 2.4.0`.
   the old contract. The silent half is watched statically by the linter's W14 —
   the only place it can be watched at all.
 
+- **Changed**: `set`, `switch` and `if` now leave a TRACE when they fail and
+  obey the step's `on_error`. Until a reference became a path these three could
+  not fail at all, so neither half was ever wired up for them — while
+  `on_error` is a step-level key that lands in the same place the other kinds
+  read it from. An unknown value in it is now refused by `Flow.Validate` for
+  every kind, not only beside an instruction.
+
+- **Changed**: a path that does not resolve inside an `exit` REASON no longer
+  cancels the exit. The reason is a caption; `exit` is how a skill hands the
+  turn back ("not my case"), and a consumer tells that apart from a failure on
+  purpose — a skill run by name stops the turn when it fails and does not when
+  it leaves. Substitution there is best-effort: whatever did not resolve stays
+  as the author wrote it, braces and all, where the reader of the reason can
+  see it.
+
 - **Changed (Go API)**: the substitution and resolution helpers now return an
   error, since a path can fail: `expand`, `expandForArgs`, `expandArgs`,
   `callArgs`, `payload` and `expandWhole` are internal, but `RefPattern` is new

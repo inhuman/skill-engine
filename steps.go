@@ -91,7 +91,7 @@ func (s *state) one(ctx context.Context, step Step) (bool, error) {
 	case step.Set != nil:
 		v, err := s.expand(step.Set.Value)
 		if err != nil {
-			return false, err
+			return s.failed(step, err, started)
 		}
 		s.set(step.Set.Var, v)
 		s.trace(step, "ok", "", 0, started)
@@ -104,7 +104,7 @@ func (s *state) one(ctx context.Context, step Step) (bool, error) {
 	case step.Switch != nil:
 		v, err := s.resolve(step.Switch.Var)
 		if err != nil {
-			return false, err
+			return s.failed(step, err, started)
 		}
 		key := strings.TrimSpace(v)
 		branch, ok := step.Switch.Cases[key]
@@ -133,7 +133,7 @@ func (s *state) one(ctx context.Context, step Step) (bool, error) {
 	case step.If != nil:
 		ok, err := s.eval(step.If.Cond)
 		if err != nil {
-			return false, err
+			return s.failed(step, err, started)
 		}
 		if ok {
 			s.trace(step, "ok", "then", 0, started)
@@ -154,9 +154,20 @@ func (s *state) one(ctx context.Context, step Step) (bool, error) {
 		return s.parallelStep(ctx, step)
 
 	case step.Exit != nil:
+		// The reason is a CAPTION, and a caption that would not interpolate must
+		// not cancel the exit. `exit` is how a skill hands the turn back — "not
+		// my case" — and a consumer tells that apart from a failure on purpose:
+		// a skill run by name stops the turn when it fails and does not when it
+		// leaves. A broken path in the caption would silently turn one into the
+		// other.
+		//
+		// So the substitution here is best-effort: whatever did not resolve
+		// stays as the author wrote it, braces and all, where the reader of the
+		// reason can see it. Better than a hole in the sentence, and better than
+		// an English remark inside a caption written in another language.
 		reason, err := s.expand(step.Exit.Reason)
 		if err != nil {
-			return false, err
+			reason = step.Exit.Reason
 		}
 		s.trace(step, "exit", reason, 0, started)
 		return false, &ExitError{Reason: reason}
@@ -824,6 +835,22 @@ func (s *state) toolsFor(run *Run) []string {
 		}
 	}
 	return out
+}
+
+// failed — a step that could not do its work: leave a trace, then let the
+// step's own policy decide.
+//
+// The kinds that reach it from `one` — `set`, `switch`, `if` — could not fail
+// at all until a reference became a PATH, so neither half was ever wired up for
+// them. Both matter. A failure with no trace vanishes: under a tolerant policy
+// the flow moves on and the events hold neither the step nor a reason, which is
+// how two live steps once dropped out of a turn and read as absent from the
+// skill. And `on_error` is a field these steps already PARSE — it lands in the
+// inline Run — so ignoring it would leave the author with a declaration that
+// has no effect, the class this format keeps hunting down.
+func (s *state) failed(step Step, err error, started time.Time) (bool, error) {
+	s.trace(step, outcomeFor(err), err.Error(), 0, started)
+	return s.onError(step, err)
 }
 
 // onError applies the step's failure policy.
