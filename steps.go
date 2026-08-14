@@ -89,7 +89,11 @@ func (s *state) one(ctx context.Context, step Step) (bool, error) {
 	}
 	switch {
 	case step.Set != nil:
-		s.set(step.Set.Var, s.expand(step.Set.Value))
+		v, err := s.expand(step.Set.Value)
+		if err != nil {
+			return false, err
+		}
+		s.set(step.Set.Var, v)
 		s.trace(step, "ok", "", 0, started)
 		return false, nil
 
@@ -98,7 +102,11 @@ func (s *state) one(ctx context.Context, step Step) (bool, error) {
 	// would take the whole remainder of the skill with it — for a full stop
 	// there is abort.
 	case step.Switch != nil:
-		key := strings.TrimSpace(s.lookup(step.Switch.Var))
+		v, err := s.resolve(step.Switch.Var)
+		if err != nil {
+			return false, err
+		}
+		key := strings.TrimSpace(v)
 		branch, ok := step.Switch.Cases[key]
 		chosen, outcome := key, "ok"
 		if !ok {
@@ -119,7 +127,7 @@ func (s *state) one(ctx context.Context, step Step) (bool, error) {
 			}
 		}
 		s.trace(step, outcome, chosen, 0, started)
-		_, err := s.run(ctx, branch)
+		_, err = s.run(ctx, branch)
 		return false, err
 
 	case step.If != nil:
@@ -146,7 +154,10 @@ func (s *state) one(ctx context.Context, step Step) (bool, error) {
 		return s.parallelStep(ctx, step)
 
 	case step.Exit != nil:
-		reason := s.expand(step.Exit.Reason)
+		reason, err := s.expand(step.Exit.Reason)
+		if err != nil {
+			return false, err
+		}
 		s.trace(step, "exit", reason, 0, started)
 		return false, &ExitError{Reason: reason}
 
@@ -167,7 +178,10 @@ func (s *state) runStep(ctx context.Context, step Step) (bool, error) {
 		// five clusters hands the model the tools of ALL five, and it can call
 		// the wrong one. Narrowing makes the mistake impossible rather than
 		// unlikely.
-		only := s.expand(step.OnServer)
+		only, err := s.expand(step.OnServer)
+		if err != nil {
+			return s.onError(step, err)
+		}
 		if err := s.allowServer(only); err != nil {
 			return s.onError(step, err)
 		}
@@ -177,9 +191,15 @@ func (s *state) runStep(ctx context.Context, step Step) (bool, error) {
 	// the rest of a value, so it is given the whole thing instead (see
 	// expandWhole). `on_server` above counts as having tools: it narrows the
 	// radius to one server rather than removing it.
-	instruction, unreachable := s.expand(run.Instruction), ""
+	var instruction, unreachable string
+	var err error
 	if len(tools) == 0 {
-		instruction, unreachable = s.expandWhole(run.Instruction)
+		instruction, unreachable, err = s.expandWhole(run.Instruction)
+	} else {
+		instruction, err = s.expand(run.Instruction)
+	}
+	if err != nil {
+		return s.onError(step, err)
 	}
 	req := StepRequest{
 		Name:           step.Name,
@@ -250,7 +270,10 @@ func (s *state) runStep(ctx context.Context, step Step) (bool, error) {
 	if isBlankResult(value) {
 		switch policy {
 		case EmptyUse:
-			value = s.expand(replacement)
+			value, err = s.expand(replacement)
+			if err != nil {
+				return s.onError(step, err)
+			}
 			s.traceCalls(step, "ok", "on_empty: used the declared value", calls, failed, started)
 		// EmptyRetry lands here with its retries spent, and is treated as
 		// EmptyFail: the author asked to retry because empty was not
@@ -330,7 +353,11 @@ func (s *state) callStep(ctx context.Context, step Step) (bool, error) {
 	if step.OnServer != "" {
 		// The server is named by the step — the tool name in call.tool may come
 		// without a prefix. The computed name goes through the same set check.
-		server = s.expand(step.OnServer)
+		expanded, err := s.expand(step.OnServer)
+		if err != nil {
+			return s.onError(step, err)
+		}
+		server = expanded
 		if _, bare, ok := SplitToolRef(call.Tool); ok {
 			tool = bare
 		} else {
@@ -354,7 +381,12 @@ func (s *state) callStep(ctx context.Context, step Step) (bool, error) {
 		return s.onError(step, err)
 	}
 
-	out, err := s.caller.CallTool(ctx, server, tool, s.callArgs(call.Args))
+	args, err := s.callArgs(call.Args)
+	if err != nil {
+		s.trace(step, outcomeFor(err), err.Error(), 0, started)
+		return s.onError(step, err)
+	}
+	out, err := s.caller.CallTool(ctx, server, tool, args)
 	if err != nil {
 		s.trace(step, outcomeFor(err), err.Error(), 1, started)
 		return s.onError(step, err)
@@ -367,7 +399,10 @@ func (s *state) callStep(ctx context.Context, step Step) (bool, error) {
 	if policy, replacement := emptyPolicyOf(step); isBlankResult(out) {
 		switch policy {
 		case EmptyUse:
-			out = s.expand(replacement)
+			out, err = s.expand(replacement)
+			if err != nil {
+				return s.onError(step, err)
+			}
 			s.trace(step, "ok", "on_empty: used the declared value", 1, started)
 		case EmptyFail:
 			s.trace(step, "degraded", errEmptyResult.Error(), 1, started)
@@ -406,7 +441,12 @@ func (s *state) delegateStep(ctx context.Context, step Step) (bool, error) {
 		s.trace(step, outcomeFor(err), err.Error(), 0, started)
 		return s.onError(step, err)
 	}
-	out, err := s.delegate.Delegate(ctx, d.Skill, s.expand(d.Task))
+	task, err := s.expand(d.Task)
+	if err != nil {
+		s.trace(step, outcomeFor(err), err.Error(), 0, started)
+		return s.onError(step, err)
+	}
+	out, err := s.delegate.Delegate(ctx, d.Skill, task)
 	if err != nil {
 		s.trace(step, outcomeFor(err), err.Error(), 0, started)
 		return s.onError(step, err)
@@ -439,7 +479,12 @@ func (s *state) forEachStep(ctx context.Context, step Step) (bool, error) {
 	//
 	// The collection is taken WHOLE: the variable holds a preview, and a
 	// truncated list would give a partial walk that looks complete.
-	items := splitCollection(s.fullValue(s.lookup(fe.In)))
+	in, err := s.resolve(fe.In)
+	if err != nil {
+		s.trace(step, outcomeFor(err), err.Error(), 0, started)
+		return s.onError(step, err)
+	}
+	items := splitCollection(s.fullValue(in))
 	total := len(items)
 	limit := fe.MaxIterations
 	if limit <= 0 {
@@ -490,7 +535,12 @@ func (s *state) forEachStep(ctx context.Context, step Step) (bool, error) {
 			// cuts the last line) and a single handle can no longer stand for N
 			// results. Resolving before the join is the only moment this is
 			// still fixable.
-			collected = append(collected, s.payload(fe.Collect))
+			got, perr := s.payload(fe.Collect)
+			if perr != nil {
+				s.trace(step, outcomeFor(perr), perr.Error(), len(items), started)
+				return s.onError(step, perr)
+			}
+			collected = append(collected, got)
 		}
 	}
 	if fe.Collect != "" {

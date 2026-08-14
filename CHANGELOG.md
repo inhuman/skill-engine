@@ -21,6 +21,60 @@ wrap skills in something of your own — front matter, a markdown body, several
 documents in one file — unwrap before calling and wrap the result back;
 anything else is refused rather than guessed at.
 
+## 2.4.0
+
+A reference may now be a PATH. A skill that does not use one behaves exactly as
+it did; a skill that uses one must declare `skill_engine_version: 2.4.0`.
+
+- **Added**: a path of any depth, and an index into a list — in a substitution
+  and on the left of a condition alike:
+
+  ```yaml
+  instruction: "{{pod.metadata.name}} restarted {{pod.status.containerStatuses[0].restartCount}} times"
+  cond: "pod.status.containerStatuses[0].restartCount > 0"
+  ```
+
+  Substitution used to stop at one field, and the comment beside it said the
+  observed cases were flat. They were, and then they were not: a tool's answer
+  is as deep as the tool made it. Measured on sixteen live generations of a step
+  description, six were refused by the format, and FIVE of the six were the same
+  case — a number three levels inside a `kubectl get` answer. Not a model
+  failing to learn the format either: the same measurement with the list of
+  allowed fields in the prompt (4.3 KB of it) held the same share of refusals.
+
+  An index is written `[0]`, not `.0`. That is what authors write, and it keeps
+  a path unambiguous: `.0` would be the field named "0" — a legal JSON key — and
+  an index at the same time.
+
+  Still deliberately absent: `[*]`, filters, arithmetic, functions. That is
+  where a format turns into a query language. A condition written with `[*]` now
+  gets a refusal of its own, naming the loop that does what was asked.
+
+- **Added, and a behaviour change**: **a path that does not resolve is an
+  error.** The step fails, and the message says where the walk broke and what
+  the object did have (`` `pod.status` has no field `restarts` (it has:
+  containerStatuses, phase) ``).
+
+  An unknown name still expands to an empty string in silence — a deliberate
+  decision, because a marker reaching the model reads as part of the
+  instruction. For a path that silence is worse: `a.b.c` with `b` missing is
+  indistinguishable from "the value is empty", and branches are taken on it.
+  Same call the numeric operands make.
+
+  **The line is drawn at what the old grammar could express.** A bare `var` and
+  a single `var.field` keep their silence, because skills written under that
+  promise live in other people's storage and must not start failing on an
+  upgrade. Anything deeper, and any index, is new syntax that owes nothing to
+  the old contract. The silent half is watched statically by the linter's W14 —
+  the only place it can be watched at all.
+
+- **Changed (Go API)**: the substitution and resolution helpers now return an
+  error, since a path can fail: `expand`, `expandForArgs`, `expandArgs`,
+  `callArgs`, `payload` and `expandWhole` are internal, but `RefPattern` is new
+  and exported — the shape of a reference, so that a linter, an editor or a
+  visualiser finds one the way the engine does instead of spelling out a
+  narrower grammar and silently skipping what it cannot parse.
+
 ## 2.3.0
 
 Four new condition forms. A skill that does not use them behaves exactly as it

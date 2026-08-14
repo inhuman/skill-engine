@@ -132,8 +132,8 @@ func TestFieldLookupIgnoresHostMemNote(t *testing.T) {
 	s := &state{vars: map[string]string{
 		"ctx": `{"head_sha":"abc123","delta_scope":"go"}` + "\n[mem:res-1]",
 	}}
-	assert.Equal(t, "abc123", s.lookup("ctx.head_sha"))
-	assert.Equal(t, "go", s.lookup("ctx.delta_scope"))
+	assert.Equal(t, "abc123", resolved(t, s, "ctx.head_sha"))
+	assert.Equal(t, "go", resolved(t, s, "ctx.delta_scope"))
 }
 
 // In a truncated preview the JSON is incomplete and will never parse. The whole
@@ -149,14 +149,15 @@ func TestFieldLookupFallsBackToWorkingMemory(t *testing.T) {
 		vars:   map[string]string{"ctx": `{"head_sha":"dead` + "…\n[mem:res-9 — this is a PREVIEW, 42kb in total]"},
 		memory: fakeMemory{"res-9": full},
 	}
-	assert.Equal(t, "deadbeef", s.lookup("ctx.head_sha"))
-	assert.Equal(t, "^(a|b)$", s.lookup("ctx.delta_regex"))
+	assert.Equal(t, "deadbeef", resolved(t, s, "ctx.head_sha"))
+	assert.Equal(t, "^(a|b)$", resolved(t, s, "ctx.delta_regex"))
 }
 
 // No memory — the field is empty, but that does not bring the turn down.
 func TestFieldLookupWithoutMemoryStaysEmpty(t *testing.T) {
 	s := &state{vars: map[string]string{"ctx": `{"head_sha":"dead` + "…\n[mem:res-9]"}}
-	assert.Equal(t, "", s.lookup("ctx.head_sha"))
+	assert.Equal(t, "", resolved(t, s, "ctx.head_sha"),
+		"one level deep keeps the silence it was promised")
 }
 
 // Into ARGUMENTS a value goes whole and without the host's note: there it is
@@ -170,7 +171,7 @@ func TestArgsGetCleanFullValue(t *testing.T) {
 		vars:   map[string]string{"findings": `{"a":1` + "…\n[mem:res-3 — this is a PREVIEW, 42kb in total]"},
 		memory: fakeMemory{"res-3": `{"a":1,"b":2}`},
 	}
-	args := s.expandArgs(map[string]any{"stdin": "{{findings}}"})
+	args := expandedArgs(t, s, map[string]any{"stdin": "{{findings}}"})
 	assert.Equal(t, `{"a":1,"b":2}`, args["stdin"], "whole, from memory, without the note")
 }
 
@@ -183,7 +184,7 @@ func TestArgsTrimDeclaredHostNote(t *testing.T) {
 			vars:  map[string]string{"findings": `{"a":1}` + "\n" + note},
 			vocab: Vocabulary{TruncationNotes: []string{"обрезано:", "gekürzt:", "shortened:"}},
 		}
-		args := s.expandArgs(map[string]any{"stdin": "{{findings}}"})
+		args := expandedArgs(t, s, map[string]any{"stdin": "{{findings}}"})
 		assert.Equal(t, `{"a":1}`, args["stdin"], note)
 	}
 }
@@ -194,7 +195,7 @@ func TestArgsTrimDeclaredHostNote(t *testing.T) {
 // host whose results legitimately end in a bracketed line.
 func TestArgsKeepAnUndeclaredNote(t *testing.T) {
 	s := &state{vars: map[string]string{"findings": `{"a":1}` + "\n[gekürzt: 42kb]"}}
-	args := s.expandArgs(map[string]any{"stdin": "{{findings}}"})
+	args := expandedArgs(t, s, map[string]any{"stdin": "{{findings}}"})
 	assert.Equal(t, `{"a":1}`+"\n[gekürzt: 42kb]", args["stdin"])
 }
 
@@ -202,7 +203,7 @@ func TestArgsKeepAnUndeclaredNote(t *testing.T) {
 // resolves it, so it can recognise it.
 func TestArgsTrimTheFormatsOwnHandle(t *testing.T) {
 	s := &state{vars: map[string]string{"findings": `{"a":1}` + "\n[mem:res-3]"}}
-	args := s.expandArgs(map[string]any{"stdin": "{{findings}}"})
+	args := expandedArgs(t, s, map[string]any{"stdin": "{{findings}}"})
 	assert.Equal(t, `{"a":1}`, args["stdin"])
 }
 
@@ -210,5 +211,24 @@ func TestArgsTrimTheFormatsOwnHandle(t *testing.T) {
 // truncated and how to read the rest.
 func TestInstructionKeepsMemHandle(t *testing.T) {
 	s := &state{vars: map[string]string{"ctx": "data\n[mem:res-9]"}}
-	assert.Contains(t, s.expand("here is {{ctx}}"), "[mem:res-9]")
+	out, err := s.expand("here is {{ctx}}")
+	require.NoError(t, err)
+	assert.Contains(t, out, "[mem:res-9]")
+}
+
+// resolved — a reference the test expects to resolve. A path that broke is an
+// error, and a test that swallowed it would be asserting about the empty string
+// the failure left behind.
+func resolved(t *testing.T, s *state, ref string) string {
+	t.Helper()
+	v, err := s.resolve(ref)
+	require.NoError(t, err)
+	return v
+}
+
+func expandedArgs(t *testing.T, s *state, args map[string]any) map[string]any {
+	t.Helper()
+	out, err := s.expandArgs(args)
+	require.NoError(t, err)
+	return out
 }
