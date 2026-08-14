@@ -326,6 +326,7 @@ reading when you are writing a skill, not before.
 | [`examples/skills/`](examples/skills/) | the format itself — thirteen skills, each a commented example |
 | [`examples/`](examples/) | two applications that embed the engine, both runnable offline |
 | [skill.schema.yaml](skill.schema.yaml) | the source of truth for the format (`SchemaRU` is the same in Russian) |
+| [handbook/](handbook/) | the failure classes and the forms that avoid them — in Russian, and reachable from code (`HandbookIndex`, `Handbook`) |
 | [lint/README.md](lint/README.md) | the rule table, and what deliberately stays with the embedder |
 | [CHANGELOG.md](CHANGELOG.md) | what changed in each format version, and what a migration does |
 

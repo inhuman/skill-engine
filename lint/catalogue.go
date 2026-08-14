@@ -32,6 +32,15 @@ type Rule struct {
 	// missing would switch off checks that never needed it — which is exactly
 	// the failure that split W2 into two passes.
 	Needs []string
+	// Handbook — the id of the handbook section that covers this class of
+	// failure, empty where none does. `skillengine.Handbook(id)` returns its
+	// text, and every finding of the rule carries the same id.
+	//
+	// The mapping lives here rather than beside each call site for the reason
+	// the catalogue exists at all: a rule that points at a section nobody can
+	// name, or at one that has been renamed, is worse than a rule that points
+	// nowhere. A test checks every id against the handbook the module ships.
+	Handbook string
 }
 
 // Rules returns the catalogue, ordered by id.
@@ -41,64 +50,78 @@ func Rules() []Rule {
 			Title: "the file parses, the header is legal, and the format version is one this engine speaks"},
 		{ID: "S3", Emits: []Severity{SeverityError}, Needs: []string{"Options.StaleAPIs"},
 			Title: "the playbook uses a construct the embedder has removed"},
-		{ID: "S5", Emits: []Severity{SeverityWarn},
+		{ID: "S5", Handbook: "context-and-cost", Emits: []Severity{SeverityWarn},
 			Title: "the playbook's size against the budget — it is context weight on every run"},
 		{ID: "S6", Emits: []Severity{SeverityInfo},
 			Title: "no trigger_examples: the skill is only reachable by being named outright"},
 
 		{ID: "W1", Emits: []Severity{SeverityError},
 			Title: "the description does not pass the engine's own validation"},
-		{ID: "W2", Emits: []Severity{SeverityError}, Needs: []string{"Facts.ServerNames"},
+		{ID: "W2", Handbook: "failures", Emits: []Severity{SeverityError}, Needs: []string{"Facts.ServerNames"},
 			Title: "a server the program names is declared by the skill (needs nothing) and registered (needs the registry)"},
 		{ID: "W3", Emits: []Severity{SeverityError}, Needs: []string{"Facts.AllTools"},
 			Title: "a call step's tool exists on its server"},
-		{ID: "W4", Emits: []Severity{SeverityWarn}, Needs: []string{"Options.Assets"},
+		{ID: "W4", Handbook: "context-and-cost", Emits: []Severity{SeverityWarn}, Needs: []string{"Options.Assets"},
 			Title: "an asset is passed the way its kind implies — through the model's context or past it"},
 		{ID: "W5", Emits: []Severity{SeverityError}, Needs: []string{"Facts.ToolSchemas"},
 			Title: "a call step carries the arguments its tool requires"},
-		{ID: "W6", Emits: []Severity{SeverityError},
+		{ID: "W6", Handbook: "flow-shape", Emits: []Severity{SeverityError},
 			Title: "somebody writes into the variable a loop collects"},
-		{ID: "W7", Emits: []Severity{SeverityError},
+		{ID: "W7", Handbook: "failures", Emits: []Severity{SeverityError},
 			Title: "a built-in tool called by a step is declared in builtin_tools"},
-		{ID: "W8", Emits: []Severity{SeverityError, SeverityWarn}, Needs: []string{"Options.Envelopes"},
+		{ID: "W8", Handbook: "context-and-cost", Emits: []Severity{SeverityError, SeverityWarn}, Needs: []string{"Options.Envelopes"},
 			Title: "a wrapped call result is substituted whole where a field was meant"},
-		{ID: "W9", Emits: []Severity{SeverityError},
+		{ID: "W9", Handbook: "response-schema", Emits: []Severity{SeverityError},
 			Title: "an object in a response schema has at least one required field"},
-		{ID: "W10", Emits: []Severity{SeverityError},
+		{ID: "W10", Handbook: "context-and-cost", Emits: []Severity{SeverityError},
 			Title: "`from:` in a call's arguments receives a handle, not the value's text"},
-		{ID: "W11", Emits: []Severity{SeverityWarn}, Needs: []string{"Options.Assets"},
+		{ID: "W11", Handbook: "context-and-cost", Emits: []Severity{SeverityWarn}, Needs: []string{"Options.Assets"},
 			Title: "an asset's params are keys the resolver actually reads"},
-		{ID: "W12", Emits: []Severity{SeverityWarn}, Needs: []string{"Options.CallProtocol", "Facts.AllTools"},
+		{ID: "W12", Handbook: "instruction-text", Emits: []Severity{SeverityWarn}, Needs: []string{"Options.CallProtocol", "Facts.AllTools"},
 			Title: "an instruction names a tool without saying how tools are called — ENTIRELY dependent on a live tool listing, so it does not run offline"},
-		{ID: "W13", Emits: []Severity{SeverityWarn}, Needs: []string{"Options.FreeTextFields"},
+		{ID: "W13", Handbook: "response-schema", Emits: []Severity{SeverityWarn}, Needs: []string{"Options.FreeTextFields"},
 			Title: "a free-text field of a response schema has a length ceiling (fields inside arrays need no vocabulary)"},
-		{ID: "W14", Emits: []Severity{SeverityError},
+		{ID: "W14", Handbook: "instruction-text", Emits: []Severity{SeverityError},
 			Title: "every reference — a {{template}} or a bare name in a condition — names a variable that exists at that point"},
-		{ID: "W15", Emits: []Severity{SeverityError}, Needs: []string{"Facts.BuiltinTools"},
+		{ID: "W15", Handbook: "failures", Emits: []Severity{SeverityError}, Needs: []string{"Facts.BuiltinTools"},
 			Title: "a declared built-in tool exists in the application's registry"},
-		{ID: "W16", Emits: []Severity{SeverityError}, Needs: []string{"Options.EmptyWords"},
+		{ID: "W16", Handbook: "response-schema", Emits: []Severity{SeverityError}, Needs: []string{"Options.EmptyWords"},
 			Title: "a required field is not one the description beside it allows to be empty"},
-		{ID: "W17", Emits: []Severity{SeverityError},
+		{ID: "W17", Handbook: "flow-shape", Emits: []Severity{SeverityError},
 			Title: "`switch.var` is given a variable's name, not a {{template}}"},
-		{ID: "W18", Emits: []Severity{SeverityWarn},
+		{ID: "W18", Handbook: "instruction-text", Emits: []Severity{SeverityWarn},
 			Title: "no alternative of a `contains` is already covered by a shorter one"},
-		{ID: "W19", Emits: []Severity{SeverityError},
+		{ID: "W19", Handbook: "context-and-cost", Emits: []Severity{SeverityError},
 			Title: "every asset a step references is declared by the skill"},
-		{ID: "W20", Emits: []Severity{SeverityWarn},
+		{ID: "W20", Handbook: "context-and-cost", Emits: []Severity{SeverityWarn},
 			Title: "every asset the skill declares is referenced by a step"},
 
-		{ID: "E1", Emits: []Severity{SeverityError}, Needs: []string{"Facts.ServerNames"},
+		{ID: "E1", Handbook: "failures", Emits: []Severity{SeverityError}, Needs: []string{"Facts.ServerNames"},
 			Title: "every server the skill declares is registered"},
 		{ID: "E2", Emits: []Severity{SeverityError}, Needs: []string{"Options.CallProtocol", "Facts.AllTools"},
 			Title: "a tool the playbook calls exists on the server it names"},
-		{ID: "E3", Emits: []Severity{SeverityWarn}, Needs: []string{"Options.ReadOnlyRoles", "Facts.WriteServers"},
+		{ID: "E3", Handbook: "failures", Emits: []Severity{SeverityWarn}, Needs: []string{"Options.ReadOnlyRoles", "Facts.WriteServers"},
 			Title: "a skill that calls itself read-only does not reach for a server that writes"},
 		{ID: "E4", Emits: []Severity{SeverityWarn}, Needs: []string{"Facts.SkillNames"},
 			Title: "a delegate step names a skill that exists"},
-		{ID: "E5", Emits: []Severity{SeverityError}, Needs: []string{"Facts.BuiltinTools"},
+		{ID: "E5", Handbook: "failures", Emits: []Severity{SeverityError}, Needs: []string{"Facts.BuiltinTools"},
 			Title: "a built-in tool the playbook says to call is declared in builtin_tools"},
 
-		{ID: SkipRule, Emits: []Severity{SeverityInfo},
+		{ID: SkipRule, Handbook: "verification", Emits: []Severity{SeverityInfo},
 			Title: "a rule did not run, and why — so a partial check is not read as a clean one"},
 	}
+}
+
+// handbookOf returns the handbook section a rule belongs to, or "".
+//
+// Looked up from the catalogue rather than kept in a second map: two lists of
+// the same thing drift, and the one that drifts here would send a reader to a
+// section about something else.
+func handbookOf(rule string) string {
+	for _, r := range Rules() {
+		if r.ID == rule {
+			return r.Handbook
+		}
+	}
+	return ""
 }

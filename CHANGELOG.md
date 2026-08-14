@@ -23,8 +23,46 @@ anything else is refused rather than guessed at.
 
 ## 2.4.0
 
-A reference may now be a PATH. A skill that does not use one behaves exactly as
-it did; a skill that uses one must declare `skill_engine_version: 2.4.0`.
+A reference may now be a PATH, and the skill author's handbook travels with the
+module.
+
+- **Added**: `handbook/` — the failure classes of the format and the forms that
+  avoid them, embedded and reachable from code:
+
+  ```go
+  for _, s := range skillengine.HandbookIndex() { … }  // ~1.4 KB, fits in a prompt
+  text := skillengine.Handbook("flow-shape")           // a section, on demand
+  ```
+
+  It existed before this release and could not be reached: it lived in the
+  ignored spec tree, so it was in no repository, no module and no `vendor/`.
+  Now it cannot drift from the engine either — updating the module updates the
+  handbook.
+
+  Why it has to be reachable rather than merely written. Over three days of a
+  model writing skills, eleven commits in a row were one class — a form the
+  format does not have, a different one each time. Three measurements from those
+  days: the LIST OF FIELDS in the prompt does not help (invented keys 1 of 8
+  against 0 of 8, inside the noise); PROSE does not (the hint "make it a separate
+  step" worked 0 times out of 16, while a ready form gets copied); and a POINTER
+  works only where the addressee can go — the refusal used to end with "call the
+  schema tool", which no skill had in its radius. So: whole forms, fetched by a
+  tool. Every section now opens with a piece to copy.
+
+  Each rule of the linter that covers a handbook class carries its section id —
+  `Rule.Handbook`, and `Finding.Handbook` on every finding it makes.
+
+  Two things the handbook deliberately is not. It is **not a second source of
+  truth about the format**: names and types of fields live in the schema, and a
+  test refuses a section that names a field the schema does not have. And it
+  carries **no installation's vocabulary** — the tool names, telemetry fields,
+  clusters and skill names of the deployment it was written in are gone, and a
+  test keeps them out. It is in Russian, like the failure reports it was written
+  from; the schema and the READMEs stay bilingual.
+
+A skill that uses no path behaves exactly as it did; one that uses a path must
+declare `skill_engine_version: 2.4.0`. The handbook needs no declaration — it is
+documentation, not format.
 
 - **Added**: a path of any depth, and an index into a list — in a substitution
   and on the left of a condition alike:

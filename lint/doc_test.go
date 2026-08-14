@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	skillengine "github.com/inhuman/skill-engine"
 	"github.com/inhuman/skill-engine/lint"
 )
 
@@ -22,6 +23,40 @@ func TestReadmeListsEveryRule(t *testing.T) {
 	for _, rule := range lint.Rules() {
 		assert.Containsf(t, doc, "| "+rule.ID+" |", "rule %s is not in the README's table", rule.ID)
 	}
+}
+
+// A rule pointing at a handbook section that does not exist is worse than a
+// rule pointing nowhere: the refusal names a place, the reader goes, and finds
+// nothing. Sections get renamed by whoever edits the handbook, and this is what
+// tells them a rule was left behind.
+func TestEveryRulePointsAtASectionThatExists(t *testing.T) {
+	sections := map[string]bool{}
+	for _, s := range skillengine.HandbookIndex() {
+		sections[s.ID] = true
+	}
+	require.NotEmpty(t, sections)
+
+	for _, rule := range lint.Rules() {
+		if rule.Handbook == "" {
+			continue
+		}
+		assert.Truef(t, sections[rule.Handbook],
+			"rule %s points at handbook section %q, which the module does not ship", rule.ID, rule.Handbook)
+		assert.NotEmpty(t, skillengine.Handbook(rule.Handbook))
+	}
+}
+
+// And the pointer has to reach the finding: a mapping invisible from a report
+// is a mapping that does nothing.
+func TestAFindingCarriesItsHandbookSection(t *testing.T) {
+	rep := lintSkill(t, wf(`  tools: ["docs"]
+  steps:
+    - name: tell
+      instruction: "retell {{nope}}"
+      tools: []
+`))
+	f := requireFinding(t, rep, "W14", lint.SeverityError)
+	assert.Equal(t, "instruction-text", f.Handbook)
 }
 
 // The same in the other direction for the fixtures: an unlisted file is one

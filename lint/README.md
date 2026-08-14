@@ -125,6 +125,20 @@ package refuses to produce.
 package: while rules were being added on both sides of the boundary they
 collided, and a number meaning two things in two places is worse than no number.
 
+## Where a finding sends the reader
+
+A rule that catches a class the handbook covers carries its section id — on the
+rule (`Rule.Handbook`) and on every finding it makes (`Finding.Handbook`). The
+text comes from the engine: `skillengine.Handbook(id)`, with
+`skillengine.HandbookIndex()` listing what there is.
+
+It is a field rather than a sentence glued onto the message, because whoever
+assembles the refusal decides what to do with it: a person reads "see also", a
+tool fetches the section and puts the form in front of the model that is writing
+the skill. That second half is the point — the previous version of this pointer
+said "call the schema tool", and on the program path that tool was in no skill's
+radius, while the steps that write skills run with `tools: []`.
+
 ## What it does not check, and why
 
 - **Judgement by a model** — do two skills claim the same requests, is the
