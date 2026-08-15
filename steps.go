@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -495,7 +496,15 @@ func (s *state) forEachStep(ctx context.Context, step Step) (bool, error) {
 		s.trace(step, outcomeFor(err), err.Error(), 0, started)
 		return s.onError(step, err)
 	}
-	items := splitCollection(s.fullValue(in))
+	items, note, splitErr := splitCollection(fe.In, s.fullValue(in))
+	if splitErr != nil {
+		// The loop cannot start, and saying so HERE is the point: the same data
+		// reached the body one step later as a line of JSON text, and the
+		// failure it caused named a field access, not the collection.
+		wrapped := fmt.Errorf("for_each over `%s`: %w", fe.In, splitErr)
+		s.trace(step, outcomeFor(wrapped), wrapped.Error(), 0, started)
+		return s.onError(step, wrapped)
+	}
 	total := len(items)
 	limit := fe.MaxIterations
 	if limit <= 0 {
@@ -567,6 +576,14 @@ func (s *state) forEachStep(ctx context.Context, step Step) (bool, error) {
 	// with its own calls. Without a trace neither their number nor how many
 	// fell over is visible.
 	outcome, reason := "ok", fmt.Sprintf("iterations: %d", len(items))
+	if note != "" {
+		// Guessing for the author is DEGRADED, not ok: the loop did run, but on
+		// a collection the description did not name. Marked so, it shows up in
+		// the skill's own diagnosis and gets the path written down; marked ok,
+		// it is indistinguishable from a description that was right.
+		outcome = "degraded"
+		reason += ", " + note
+	}
 	if total > limit {
 		outcome = "degraded"
 		reason = fmt.Sprintf("iterations: %d of %d — ceiling", limit, total)
@@ -588,24 +605,83 @@ func outcomeFor(err error) string {
 	return "error"
 }
 
-// splitCollection parses a variable's value into a list of items: a JSON array
-// or lines. The latter is the observed case: a list produced by a tool.
-func splitCollection(v string) []string {
+// splitCollection parses a variable's value into a list of items: a JSON array,
+// a JSON object holding one, or lines. The last is the observed case: a list
+// produced by a tool.
+//
+// The object case is paid for by a live run of 15.08. `kubectl_get` answers
+// `{"items": [...]}`, the skill said `for_each: {in: pods}`, and the value —
+// being multi-line and not starting with `[` — was split BY LINES. The first
+// "item" was the line `{`, and the failure surfaced one step further in
+// (`pod.metadata.name: pod is not JSON — it holds "{"`), where nothing points at
+// the loop that produced it.
+//
+// Splitting an object by lines is never right: it is data falling apart, not a
+// list. Where the object holds exactly ONE array, that array is what the loop
+// meant — the guess has no second reading — and it is taken WITH A NOTE, not
+// quietly. Where it holds several, the choice belongs to the author, and the
+// refusal names the fields so a path can be written (`pods.items`).
+func splitCollection(name, v string) (items []string, note string, err error) {
 	v = strings.TrimSpace(v)
 	if v == "" {
-		return nil
+		return nil, "", nil
 	}
 	if strings.HasPrefix(v, "[") {
 		var arr []any
-		if err := json.Unmarshal([]byte(v), &arr); err == nil {
-			out := make([]string, 0, len(arr))
-			for _, e := range arr {
-				out = append(out, itemText(e))
-			}
-			return out
+		if uErr := json.Unmarshal([]byte(v), &arr); uErr == nil {
+			return jsonItems(arr), "", nil
 		}
 	}
-	return nonEmpty(strings.Split(v, "\n"))
+	if strings.HasPrefix(v, "{") {
+		var obj map[string]any
+		if uErr := json.Unmarshal([]byte(v), &obj); uErr == nil {
+			return objectCollection(name, obj)
+		}
+	}
+	return nonEmpty(strings.Split(v, "\n")), "", nil
+}
+
+// objectCollection picks the list out of an object, or explains why it cannot.
+func objectCollection(name string, obj map[string]any) (items []string, note string, err error) {
+	var names []string
+	for k, val := range obj {
+		if _, ok := val.([]any); ok {
+			names = append(names, k)
+		}
+	}
+	sort.Strings(names)
+	switch len(names) {
+	case 1:
+		arr, _ := obj[names[0]].([]any)
+		return jsonItems(arr), fmt.Sprintf(
+			"the variable held an object, not a list — iterated over its only list, `%s`", names[0]), nil
+	case 0:
+		return nil, "", fmt.Errorf(
+			"the variable holds a JSON object without a list inside — there is nothing to iterate over. "+
+				"Its fields: %s", strings.Join(objectKeys(obj), ", "))
+	default:
+		return nil, "", fmt.Errorf(
+			"the variable holds a JSON object with several lists (%s) — say which one to iterate, "+
+				"by writing a path in `in` (for example `%s.%s`)",
+			strings.Join(names, ", "), name, names[0])
+	}
+}
+
+func jsonItems(arr []any) []string {
+	out := make([]string, 0, len(arr))
+	for _, e := range arr {
+		out = append(out, itemText(e))
+	}
+	return out
+}
+
+func objectKeys(obj map[string]any) []string {
+	out := make([]string, 0, len(obj))
+	for k := range obj {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // itemText — one element of a collection as the loop's body will see it.
