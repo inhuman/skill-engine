@@ -72,6 +72,11 @@ func TestSchemaCoversStructFields(t *testing.T) {
 // yamlFields lists the field names a type accepts in YAML, following inline
 // embeds — `Run` is inline in `Step`, so its fields are written ON the step and
 // belong to the step's set of keys.
+//
+// A field tagged `schema:"-"` is skipped: the parser reads it in order to
+// REFUSE it, not because the format has it. Today that is a generation
+// parameter written on a step instead of inside `sampling` — describing it in
+// the schema would state the opposite of what Validate does with it.
 func yamlFields(t reflect.Type) []string {
 	for t.Kind() == reflect.Ptr {
 		t = t.Elem()
@@ -83,6 +88,9 @@ func yamlFields(t reflect.Type) []string {
 	for i := range t.NumField() {
 		f := t.Field(i)
 		if !f.IsExported() {
+			continue
+		}
+		if f.Tag.Get("schema") == "-" {
 			continue
 		}
 		tag := f.Tag.Get("yaml")

@@ -28,7 +28,7 @@ import (
 //	minor — an optional field was added (a skill using it requires an engine
 //	        no older than that minor);
 //	patch — engine fixes, the format did not change.
-const EngineVersion = "2.4.0"
+const EngineVersion = "2.4.1"
 
 // LegacyEngineVersion — what counts as the declared version when the field is
 // absent (skills written before it was introduced).
