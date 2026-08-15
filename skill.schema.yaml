@@ -452,6 +452,15 @@ $defs:
 
           0 is NOT "unlimited": the executor's ceiling is substituted. An
           unlimited step is deliberately absent from the format.
+      max_tool_errors:
+        type: integer
+        minimum: 0
+        description: |
+          How many failed tool calls the step tolerates before it gives up. A
+          step that keeps calling a source that keeps refusing burns its budget
+          on a source that has already answered.
+
+          0 — the executor's default.
       one_of:
         type: array
         items: {type: string}
