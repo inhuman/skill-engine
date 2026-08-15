@@ -215,6 +215,34 @@ type Run struct {
 	Model string `yaml:"model,omitempty"`
 	// Sampling — the step's generation parameters (see the Sampling type).
 	Sampling *Sampling `yaml:"sampling,omitempty"`
+
+	// Misplaced — generation parameters written ON THE STEP instead of inside
+	// `sampling`. NOT part of the format: it exists so that Validate can refuse
+	// them, and `schema:"-"` says as much to the test that keeps the schema
+	// equal to these structs.
+	//
+	// Why catch them at all. YAML drops an unknown key without a word, so
+	// `max_tokens: 8000` written beside the instruction parsed clean and did
+	// nothing — a ceiling declared and absent, indistinguishable by eye from a
+	// step that never asked for one. Measured over a live catalogue of 29
+	// skills: of ten declarations of a ceiling, NINE were written here and had
+	// never worked a single day; the one that worked sat inside a profile's
+	// `sampling`.
+	//
+	// Not one author's slip, either. Those files were written by hand by
+	// someone who knew the format, and a skill-writing model produces the same
+	// shape — it is what the format leads a reader to expect, because every
+	// other parameter of a step (`model`, `tools`, `max_calls`,
+	// `response_schema`, `one_of`) is written on the step, so a sampling knob
+	// reads as their neighbour.
+	//
+	// Refused rather than quietly folded into Sampling: the engine keeps
+	// generation parameters in a block of their own on purpose, and an alias
+	// blurs the line that block exists to draw. A refusal is loud and paid once
+	// — a description gets fixed for good, where the silence lasted nine
+	// declarations in a row.
+	Misplaced *Sampling `yaml:",inline" schema:"-"`
+
 	// ResponseSchema — the schema of the step's structured answer. The result is
 	// stored in the variable as an object, fields reachable as {{var.field}}.
 	//
@@ -738,6 +766,15 @@ func validateSteps(steps []Step, path string) error {
 			at = fmt.Sprintf("%s (%s)", at, s.Name)
 		}
 		n := 0
+		// Before the verdict on what the step DOES: a step carrying nothing but
+		// a stray `max_tokens` would otherwise be refused as "does nothing",
+		// which is true and unhelpful — the author wrote a ceiling and needs to
+		// be told where it goes.
+		if s.Run != nil {
+			if err := misplacedSamplingError(at, "step", s.Run.Misplaced); err != nil {
+				return err
+			}
+		}
 		// `on_error` is a STEP-level key and lands in the inline Run whatever the
 		// step does — so it is checked here rather than beside the instruction.
 		// Since a reference became a path, `set`, `switch` and `if` can fail too

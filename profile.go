@@ -39,6 +39,17 @@ type Profile struct {
 	MaxCalls      int         `yaml:"max_calls,omitempty"`
 	MaxToolErrors int         `yaml:"max_tool_errors,omitempty"`
 	OnError       ErrorPolicy `yaml:"on_error,omitempty"`
+
+	// Misplaced — the same trap as on a step, and it is here for the same
+	// reason: a profile also keeps its generation parameters in `sampling`, so
+	// `max_tokens` written one level up is dropped by YAML without a word.
+	// Refused by Validate; Run.Misplaced records what that silence cost.
+	//
+	// Worth having even though the measurement found no live case: a profile is
+	// where the ceiling that DID work was written, so it is the shape an author
+	// copies from — and copying it a level too high is precisely the mistake
+	// this whole check exists for.
+	Misplaced *Sampling `yaml:",inline" schema:"-"`
 }
 
 // applyProfiles folds each step's profile into the step itself.
@@ -130,6 +141,9 @@ func validateProfiles(profiles map[string]Profile) error {
 		}
 		if p.MaxToolErrors < 0 {
 			return fmt.Errorf("profile %q: max_tool_errors is negative", name)
+		}
+		if err := misplacedSamplingError("profile "+name, "profile", p.Misplaced); err != nil {
+			return err
 		}
 	}
 	return nil

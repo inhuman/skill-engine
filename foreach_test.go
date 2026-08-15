@@ -357,3 +357,106 @@ steps:
 	require.NoError(t, err)
 	require.Len(t, r.seen, 3, "walked the lines of stdout, not the whole envelope")
 }
+
+// A tool answering `{"items": [...]}` is a LIST, not forty lines of text.
+//
+// Live run of 15.08. `kubectl_get` answers with an object; the skill said
+// `for_each: {in: pods}`; the value did not start with `[`, so it was split BY
+// LINES. The first "item" was the line `{`, and the failure surfaced one step
+// deeper — `pod.metadata.name: pod is not JSON, it holds "{"` — where nothing
+// points back at the loop that made it.
+func TestForEachOverObjectWithOneList(t *testing.T) {
+	f := parseFlow(t, `
+steps:
+  - name: walk
+    for_each:
+      in: pods
+      as: pod
+      collect: acc
+      steps:
+        - set: {var: acc, value: "{{pod.name}}"}
+`)
+	vars, outcome, err := ExecuteWith(context.Background(), f, Deps{}, map[string]string{
+		"pods": "{\n  \"items\": [\n    {\"name\": \"api\"},\n    {\"name\": \"web\"}\n  ]\n}",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "api\n\nweb", vars["acc"])
+
+	// Guessing for the author is said out loud: marked ok it would be
+	// indistinguishable from a description that named the list itself.
+	loop := traceOf(t, outcome, "walk")
+	assert.Equal(t, "degraded", loop.Outcome)
+	assert.Contains(t, loop.Reason, "items")
+}
+
+// Several lists inside one object — the choice belongs to the author, and the
+// refusal has to name both the loop and the fields, so a path can be written.
+func TestForEachOverObjectWithSeveralLists(t *testing.T) {
+	f := parseFlow(t, `
+steps:
+  - name: walk
+    for_each:
+      in: data
+      as: it
+      steps:
+        - set: {var: acc, value: "{{it}}"}
+`)
+	_, _, err := ExecuteWith(context.Background(), f, Deps{}, map[string]string{
+		"data": `{"items":[{"name":"api"}],"events":[{"kind":"Pulled"}]}`,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "for_each over `data`")
+	assert.Contains(t, err.Error(), "events, items")
+	assert.Contains(t, err.Error(), "data.events", "the refusal shows the shape of the answer")
+}
+
+// An object with no list inside cannot be iterated at all, and lines would only
+// hide that.
+func TestForEachOverObjectWithoutAList(t *testing.T) {
+	f := parseFlow(t, `
+steps:
+  - name: walk
+    for_each:
+      in: pod
+      as: it
+      steps:
+        - set: {var: acc, value: "{{it}}"}
+`)
+	_, _, err := ExecuteWith(context.Background(), f, Deps{}, map[string]string{
+		"pod": `{"name":"api","status":"Running"}`,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "without a list inside")
+	assert.Contains(t, err.Error(), "name, status")
+}
+
+// Text that merely BEGINS with a brace is still text: splitting by lines is the
+// observed case for tool output, and an unparseable object must not steal it.
+func TestForEachOverLinesStartingWithABrace(t *testing.T) {
+	f := parseFlow(t, `
+steps:
+  - for_each:
+      in: lines
+      as: it
+      collect: acc
+      steps:
+        - set: {var: acc, value: "{{it}}"}
+`)
+	vars, _, err := ExecuteWith(context.Background(), f, Deps{}, map[string]string{
+		"lines": "{unclosed\nsecond",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "{unclosed\n\nsecond", vars["acc"])
+}
+
+// traceOf finds a step's trace by name.
+func traceOf(t *testing.T, outcome Outcome, name string) StepTrace {
+	t.Helper()
+	for _, tr := range outcome.Steps {
+		if tr.Name == name {
+			return tr
+		}
+	}
+	t.Fatalf("step %q left no trace", name)
+	return StepTrace{}
+}

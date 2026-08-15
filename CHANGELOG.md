@@ -21,6 +21,53 @@ wrap skills in something of your own — front matter, a markdown body, several
 documents in one file — unwrap before calling and wrap the result back;
 anything else is refused rather than guessed at.
 
+## 2.4.1
+
+An engine fix; the format gained nothing. It **changes behaviour** — a
+description that used to load may now be refused, and that is the point.
+
+- **Fixed, and a behaviour change**: a generation parameter written on a STEP
+  instead of inside `sampling` is now refused by `Flow.Validate`, naming the
+  parameter and the block it belongs in:
+
+  ```
+  steps[0] (write_fix): max_tokens is a generation parameter and belongs
+  inside `sampling: {max_tokens: 8000}`, not on the step itself
+  ```
+
+  Before, YAML dropped the key without a word: a ceiling was declared and
+  absent at the same time, and by eye that is indistinguishable from a step
+  that never asked for one. Measured over a live catalogue of 29 skills — of
+  ten declarations of a token ceiling, **nine were written on the step and had
+  never worked a single day**; the one that worked sat inside a profile's
+  `sampling`.
+
+  It is not one author's inattention. Those files were written by hand by
+  someone who knew the format, and a skill-writing model produces the same
+  shape: every other parameter of a step (`model`, `tools`, `max_calls`,
+  `response_schema`, `one_of`) is written on the step, so a sampling knob reads
+  as their neighbour.
+
+  **Refused rather than quietly folded into `sampling`.** Accepting it as an
+  alias would blur the line the block exists to draw, and the engine keeps
+  generation parameters apart on purpose. A refusal is loud and paid once — a
+  description is fixed for good, where the silence lasted nine declarations in
+  a row.
+
+  The same applies to a parameter written on a PROFILE, which keeps its
+  parameters in `sampling` too. No live case was found there — but a profile is
+  where the ceiling that DID work was written, so it is the shape an author
+  copies from.
+
+  **If a skill of yours carries one of these, it now fails to load** — with the
+  fix printed. That is the same ceiling that was not being applied before, so
+  nothing it did changes; only the lie about it does.
+
+  Every field of `Sampling` behaves the same way, now and as the type grows:
+  both the check and its test enumerate the fields by reflection, because a
+  hand-written list of names is exactly what would let the NEXT parameter
+  disappear in the same silence.
+
 ## 2.4.0
 
 A reference may now be a PATH, and the skill author's handbook travels with the
