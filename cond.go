@@ -113,6 +113,11 @@ var (
 // a query language. What they want is a loop, and the message says so.
 var selectorRe = regexp.MustCompile(`\[\s*[*?]`)
 
+// conjunctionRe — a joined condition, in any of the notations authors reach for.
+// `contains a | b` is deliberately absent: a single pipe is that form's own
+// syntax, and it means alternatives of ONE comparison.
+var conjunctionRe = regexp.MustCompile(`\s(&&|\|\||\band\b|\bor\b|\bAND\b|\bOR\b)\s`)
+
 // isBlank — "the step produced nothing useful": empty or a failure marker.
 func isBlank(v string) bool {
 	t := strings.TrimSpace(v)
@@ -143,6 +148,24 @@ func parseCond(cond string) (name, op, want string, err error) {
 		}
 		return "", "", "", fmt.Errorf("condition %q: a condition takes a variable NAME, without {{ }} — write `%s`",
 			cond, bare)
+	}
+	// A CONJUNCTION is refused before anything else parses it.
+	//
+	// Without this the refusal never comes: `==` and `!=` take everything to
+	// their right as a STRING, so `pod.restartCount != null && pod.restartCount
+	// > 5` parses cleanly as "the field differs from the text `null &&
+	// pod.restartCount > 5`" — which is always true. Live run of 16.08: a repair
+	// wrote exactly that, the skill saved without a complaint, and it would have
+	// pulled logs for EVERY pod while looking like it filtered them.
+	//
+	// One condition is one comparison. A guard against emptiness belongs on the
+	// step (`when:`), and a second branch is a nested `if` — both are in the
+	// message, because an author who wrote a conjunction is not looking for a
+	// list of allowed forms, but for where the other half goes.
+	if m := conjunctionRe.FindStringSubmatch(cond); m != nil {
+		return "", "", "", fmt.Errorf("condition %q: no conjunctions (%s) — one condition is one comparison. "+
+			"A guard against emptiness goes on the STEP: `when: x is not empty`, and the comparison stays in "+
+			"`cond`. Need a second branch as well — nest one `if` inside another", cond, strings.TrimSpace(m[1]))
 	}
 	if m := emptyCondRe.FindStringSubmatch(cond); m != nil {
 		op = "is empty"
