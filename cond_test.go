@@ -428,3 +428,40 @@ steps:
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "without anything to look for")
 }
+
+// A conjunction is refused LOUDLY, because otherwise it is not refused at all.
+//
+// `==` and `!=` take everything to their right as a string, so
+// `x != null && x > 5` used to parse as "x differs from the text
+// `null && x > 5`" — always true. Live run of 16.08: a repair wrote exactly
+// that, the skill saved without a complaint, and it would have pulled logs for
+// EVERY pod while looking like it filtered them.
+func TestConjunctionInConditionIsRefused(t *testing.T) {
+	for _, c := range []string{
+		"pod.restartCount != null && pod.restartCount > 5",
+		"a == b || c == d",
+		"x is not empty and x > 5",
+		"x > 5 or y > 5",
+	} {
+		_, _, _, err := parseCond(c)
+		if err == nil {
+			t.Fatalf("условие %q обязано быть отвергнуто", c)
+		}
+		if !strings.Contains(err.Error(), "no conjunctions") {
+			t.Fatalf("отказ обязан называть причину, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "when:") {
+			t.Fatalf("отказ обязан показывать, куда девать вторую половину, got %v", err)
+		}
+	}
+
+	// Границу держим: одиночная вертикальная черта — синтаксис `contains`, там
+	// это АЛЬТЕРНАТИВЫ одного сравнения, а не второе условие.
+	if _, op, _, err := parseCond("kind contains error | warn"); err != nil || op != "contains" {
+		t.Fatalf("contains a | b обязано работать: op=%q err=%v", op, err)
+	}
+	// И обычные сравнения не задеты.
+	if _, _, _, err := parseCond("pod.restartCount > 5"); err != nil {
+		t.Fatalf("простое сравнение сломано: %v", err)
+	}
+}
