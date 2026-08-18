@@ -17,6 +17,7 @@ the report being read.
 | `envelope.yaml` | W3, W8, W10 | a wrapper passed where the payload was meant |
 | `loose-schema.yaml` | W9, W13, W16 | a structured answer with nothing holding it together |
 | `asset-names.yaml` | W19, W20 | an asset referenced under a name nobody declared, and one nobody reads |
+| `schema-field.yaml` | W21 | a branch keyed on a field the declared schema does not have |
 | `dead-alternative.yaml` | W14, W18 | a `contains` dictionary whose entries swallow each other |
 | `payload.yaml` | W4, W5, W7, W11, W15, W17, E4 | payloads passed the wrong way, addresses that do not exist |
 

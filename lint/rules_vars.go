@@ -38,6 +38,10 @@ func (r *run) workflowVarRefs(flow *skillengine.Flow) {
 	// and referring to it is legitimate.
 	known[skillengine.AnswerVar] = true
 
+	// shapes — variables whose fields are KNOWN because the step that saves
+	// them declares a response schema.
+	shapes := map[string]map[string]bool{}
+
 	var walk func(steps []skillengine.Step, scope map[string]bool)
 	walk = func(steps []skillengine.Step, scope map[string]bool) {
 		for i := range steps {
@@ -54,7 +58,9 @@ func (r *run) workflowVarRefs(flow *skillengine.Flow) {
 					r.add("W14", SeverityError, "step `%s` refers to %s, and there is no variable `%s` "+
 						"at that point — the engine will silently substitute an EMPTY string. Available: %s",
 						stepLabel(s, i), ref.shown, base, strings.Join(sortedKeys(scope), ", "))
+					continue
 				}
+				r.fieldOfDeclaredShape(s, i, ref, shapes)
 			}
 
 			// The iteration variable is declared BEFORE the loop's body: the
@@ -74,6 +80,13 @@ func (r *run) workflowVarRefs(flow *skillengine.Flow) {
 			}
 			for _, produced := range producedBy(s) {
 				scope[produced] = true
+			}
+			// A step that declares a schema also declares the SHAPE of what it
+			// saves, and that is checkable (W21 below).
+			if s.Run != nil && s.Run.SaveAs != "" && len(s.Run.ResponseSchema) > 0 {
+				if fields, ok := schemaFields(s.Run.ResponseSchema); ok {
+					shapes[s.Run.SaveAs] = fields
+				}
 			}
 		}
 	}
@@ -312,4 +325,70 @@ func jsonStrings(node any) []string {
 	}
 	walk(node)
 	return out
+}
+
+// W21 — a reference to a FIELD that the variable's declared schema does not
+// have.
+//
+// W14 stops one level short. It answers "does this NAME exist", and a name
+// that exists is enough for it — so `pick.name` passes while the step saving
+// `pick` declares only `index`. The engine then resolves the missing field to
+// an empty string exactly as it does a missing name, and the branch built on
+// it is quietly never taken. Found on a live catalogue: a bail-out branch
+// (`cond: pick.name == NONE`) that had not run once since it was written,
+// while its author believed the behaviour was in effect and had committed it
+// as the important one.
+//
+// Only variables with a DECLARED schema are checked. A tool's result has no
+// shape the linter can know, and guessing one would produce findings about
+// fields that are really there — the fastest way to teach an author to ignore
+// the report.
+func (r *run) fieldOfDeclaredShape(s *skillengine.Step, i int, ref varRef, shapes map[string]map[string]bool) {
+	base, rest, ok := strings.Cut(ref.name, ".")
+	if !ok {
+		return
+	}
+	fields, known := shapes[base]
+	if !known {
+		return
+	}
+	field, _, _ := strings.Cut(rest, ".")
+	if field == "" || fields[field] {
+		return
+	}
+	// The engine's own suffixes are not fields of the answer and are legitimate
+	// on any variable.
+	if engineSuffixes[field] {
+		return
+	}
+	r.add("W21", SeverityError, "step `%s` reads %s, but the schema of `%s` declares no field `%s` — "+
+		"the engine substitutes an EMPTY string for a missing field just as it does for a missing "+
+		"name, so a condition on it is never true. Declared: %s",
+		stepLabel(s, i), ref.shown, base, field, strings.Join(sortedKeys(fields), ", "))
+}
+
+// engineSuffixes — names the engine adds to a saved value, whatever its schema.
+var engineSuffixes = map[string]bool{
+	"mem":     true, // handle to the value in working memory
+	"skipped": true, // branches a `parallel` did not run
+	"failed":  true, // iterations that returned an error
+}
+
+// schemaFields — the top-level property names of an object schema. Anything
+// that is not an object with declared properties yields no expectation at all:
+// a rule that cannot tell what is allowed must not tell the author what is
+// forbidden.
+func schemaFields(schema map[string]any) (map[string]bool, bool) {
+	if t, _ := schema["type"].(string); t != "object" && t != "" {
+		return nil, false
+	}
+	props, ok := schema["properties"].(map[string]any)
+	if !ok || len(props) == 0 {
+		return nil, false
+	}
+	out := make(map[string]bool, len(props))
+	for name := range props {
+		out[name] = true
+	}
+	return out, true
 }

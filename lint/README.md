@@ -114,6 +114,7 @@ package refuses to produce.
 | W18 | warn | no alternative of a `contains` is already covered by a shorter one | — |
 | W19 | error | every asset a step references is declared by the skill | — |
 | W20 | warn | every asset the skill declares is referenced by a step | — |
+| W21 | error | a field read from a variable is declared by that variable's schema | — |
 | E1 | error | every server the skill declares is registered | `Facts.ServerNames` |
 | E2 | error | a tool the playbook calls exists on the server it names | `Options.CallProtocol`, `Facts.AllTools` |
 | E3 | warn | a read-only skill does not reach for a server that writes | `Options.ReadOnlyRoles`, `Facts.WriteServers` |
