@@ -95,6 +95,8 @@ func Rules() []Rule {
 			Title: "every asset a step references is declared by the skill"},
 		{ID: "W20", Handbook: "context-and-cost", Emits: []Severity{SeverityWarn},
 			Title: "every asset the skill declares is referenced by a step"},
+		{ID: "W21", Handbook: "instruction-text", Emits: []Severity{SeverityError},
+			Title: "a field read from a variable is declared by that variable's schema"},
 
 		{ID: "E1", Handbook: "failures", Emits: []Severity{SeverityError}, Needs: []string{"Facts.ServerNames"},
 			Title: "every server the skill declares is registered"},

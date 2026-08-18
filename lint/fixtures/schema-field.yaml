@@ -1,0 +1,40 @@
+# A branch keyed on a field the schema does not have.
+#
+# Defect: W21. The step declares a schema with one field, `index`, and the
+# branch below asks about `pick.name`. The name `pick` exists, so the check one
+# level up (W14) is satisfied and says nothing.
+#
+# Nothing fails: a missing field resolves to an empty string exactly as a
+# missing name does, the comparison is never true, and the branch never runs.
+# What is lost is a behaviour the author believes is in effect — here the
+# bail-out that was supposed to hand the work to someone able to finish it.
+
+skill_engine_version: "2.2.0"
+skill_version: "1.0.0"
+name: schema-field
+description: A fixture — a condition reading a field outside the declared schema.
+trigger_examples: ["a fixture phrase about choosing an item"]
+role: reader
+
+workflow:
+  steps:
+    - name: choose
+      instruction: "Return the NUMBER of the matching item, or -1."
+      tools: []
+      model: test-model
+      save_as: pick
+      response_schema:
+        type: object
+        properties:
+          index: {type: integer}
+        required: [index]
+
+    - if:
+        cond: "pick.name == NONE"
+        then:
+          - name: give_up
+            exit: {reason: nothing matched}
+
+    - name: tell
+      instruction: "Item number {{pick.index}}."
+      tools: []
