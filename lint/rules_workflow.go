@@ -159,8 +159,8 @@ func (r *run) workflowTools(flow *skillengine.Flow) {
 // instruction burns context and invites the model to rewrite it, while
 // reference material passed by reference never reaches the model at all.
 func (r *run) workflowAssets(flow *skillengine.Flow) {
-	inText, byRef := assetUsage(flow)
-	r.assetRefsResolve(flow, inText, byRef)
+	inText, byRef, inArgText := assetUsage(flow)
+	r.assetRefsResolve(flow, inText, byRef, inArgText)
 	if len(flow.Assets) == 0 {
 		return
 	}
@@ -178,7 +178,7 @@ func (r *run) workflowAssets(flow *skillengine.Flow) {
 			r.add("W4", SeverityWarn, "asset `%s` is code, and it is substituted into the instruction's text "+
 				"({{asset:%s}}): the body goes through the model's context, and the model starts rewriting it. "+
 				"Pass it by reference instead: args: {stdin: {from: \"asset:%s\"}}", name, name, name)
-		case contains(v.ReferenceKinds, a.Kind) && byRef[name] && !inText[name]:
+		case contains(v.ReferenceKinds, a.Kind) && (byRef[name] || inArgText[name]) && !inText[name]:
 			r.add("W4", SeverityWarn, "asset `%s` is reference material, and it is only passed by reference "+
 				"({from: asset:%s}): the model never sees it. If it is knowledge to reason with, substitute "+
 				"it: {{asset:%s}}", name, name, name)
@@ -207,9 +207,9 @@ func (r *run) workflowAssets(flow *skillengine.Flow) {
 //
 // Purely static, both of them: the declarations and the references are in one
 // document, and no registry of anything is involved.
-func (r *run) assetRefsResolve(flow *skillengine.Flow, inText, byRef map[string]bool) {
+func (r *run) assetRefsResolve(flow *skillengine.Flow, inText, byRef, inArgText map[string]bool) {
 	used := map[string]bool{}
-	for _, set := range []map[string]bool{inText, byRef} {
+	for _, set := range []map[string]bool{inText, byRef, inArgText} {
 		for name := range set {
 			used[name] = true
 		}
@@ -280,8 +280,8 @@ func paramString(a skillengine.Asset, key string) string {
 }
 
 // assetUsage marks how each asset is used by the program.
-func assetUsage(flow *skillengine.Flow) (inText, byRef map[string]bool) {
-	inText, byRef = map[string]bool{}, map[string]bool{}
+func assetUsage(flow *skillengine.Flow) (inText, byRef, inArgText map[string]bool) {
+	inText, byRef, inArgText = map[string]bool{}, map[string]bool{}, map[string]bool{}
 	walkSteps(flow.Steps, func(s *skillengine.Step, _ int) {
 		if s.Run != nil {
 			for _, n := range skillengine.AssetRefsInText(s.Run.Instruction) {
@@ -295,9 +295,50 @@ func assetUsage(flow *skillengine.Flow) (inText, byRef map[string]bool) {
 			for _, n := range skillengine.AssetRefsInText(s.Call.Tool) {
 				inText[n] = true
 			}
+			// A call passes an asset in TWO ways, and only one of them was
+			// counted here. `{from: "asset:x"}` hands the body over past the
+			// model; `code: "{{asset:x}}"` substitutes it into an argument as
+			// text. The second is how a script gets into an exec call, so the
+			// rule about unused assets reported live payloads as dead — 19 of
+			// them in one catalogue, none real. A finding that is wrong that
+			// often is worse than a missing one: it teaches people to skim the
+			// report past everything.
+			//
+			// Kept SEPARATE from instruction text on purpose. The warning about
+			// code reaching the model applies to an instruction, where the
+			// model reads what was substituted; a `call` is executed by the
+			// host, and its arguments never enter a prompt. Folding the two
+			// together would have traded one false finding for another.
+			for _, n := range assetRefsInArgText(s.Call.Args) {
+				inArgText[n] = true
+			}
 		}
 	})
-	return inText, byRef
+	return inText, byRef, inArgText
+}
+
+// assetRefsInArgText finds `{{asset:name}}` inside argument VALUES, at any
+// depth: arguments nest, and a payload is as often two levels down (`args.code`
+// under a branch) as at the top.
+func assetRefsInArgText(args map[string]any) []string {
+	var out []string
+	var walk func(any)
+	walk = func(v any) {
+		switch t := v.(type) {
+		case map[string]any:
+			for _, sub := range t {
+				walk(sub)
+			}
+		case []any:
+			for _, sub := range t {
+				walk(sub)
+			}
+		case string:
+			out = append(out, skillengine.AssetRefsInText(t)...)
+		}
+	}
+	walk(args)
+	return out
 }
 
 // workflowServerNames collects the server names the program mentions.

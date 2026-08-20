@@ -27,7 +27,10 @@ var fixtureRules = map[string][]string{
 	"payload.yaml":          {"W4", "W5", "W7", "W11", "W15", "W17", "E4"},
 	"dead-alternative.yaml": {"W18"},
 	"asset-names.yaml":      {"W19", "W20"},
-	"schema-field.yaml":     {"W21"},
+	// Clean on purpose: it guards a FALSE finding rather than a real one.
+	// Nothing to expect here — the rules must stay silent.
+	"asset-in-arg-text.yaml": nil,
+	"schema-field.yaml":      {"W21"},
 }
 
 func lintFixture(t *testing.T, name string) lint.Report {
