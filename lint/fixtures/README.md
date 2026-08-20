@@ -20,6 +20,14 @@ the report being read.
 | `schema-field.yaml` | W21 | a branch keyed on a field the declared schema does not have |
 | `dead-alternative.yaml` | W14, W18 | a `contains` dictionary whose entries swallow each other |
 | `payload.yaml` | W4, W5, W7, W11, W15, W17, E4 | payloads passed the wrong way, addresses that do not exist |
+| `asset-in-arg-text.yaml` | — | CLEAN: an asset substituted into a call's argument, which is not a defect |
+
+One fixture is CLEAN, and that is its job: `asset-in-arg-text.yaml` guards a
+false finding rather than a real one. `code: "{{asset:x}}"` is how a script
+reaches an exec call, and the rules once read it as an unused asset AND as code
+leaking into the model's context — nineteen wrong findings in one live
+catalogue, none of them real. A rule wrong that often teaches people to skim
+past the whole report, so the silence is worth a fixture.
 
 Two rules have no fixture on purpose: **S1** needs a file that does not load,
 and **S5** an oversized one — a fixture cannot be both broken and readable. They

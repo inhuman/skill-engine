@@ -1,0 +1,37 @@
+# An asset substituted into an argument AS TEXT — the second reference form.
+#
+# Clean on purpose: nothing here is a defect. It stands guard over a false
+# finding instead. `code: "{{asset:script}}"` is how a script reaches an exec
+# call, and the unused-asset rule counted only `{from: "asset:x"}`, so it
+# called live payloads dead — nineteen of them in one live catalogue, not one
+# of them real. A rule wrong that often is worse than a missing one: it teaches
+# people to skim past the whole report.
+
+skill_engine_version: "2.2.0"
+skill_version: "1.0.0"
+name: asset-in-arg-text
+description: A fixture — an asset passed into an argument by substitution.
+trigger_examples: ["a fixture phrase about substituted assets"]
+servers: ["runner"]
+role: reader
+
+workflow:
+  tools: ["runner"]
+
+  assets:
+    script:
+      kind: code
+      source: inline
+      params: {lang: python}
+      content: |
+        import sys
+        print(sys.stdin.read().strip())
+
+  steps:
+    - name: run
+      call:
+        tool: "runner:exec"
+        args:
+          code: "{{asset:script}}"
+          stdin: ["payload"]
+        save_as: out
